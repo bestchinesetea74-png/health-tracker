@@ -13,8 +13,10 @@ package.domain = org.vladimir
 source.dir = .
 source.include_exts = py,png,jpg,json
 
+# (str) Application versioning
+version = 0.1
+
 # (list) Application requirements
-# Убедитесь, что здесь указан kivy и те библиотеки, которые вы импортируете в main.py
 requirements = python3,kivy,pillow,google-api-python-client,google-auth,google-auth-oauthlib
 
 # (str) Supported orientations (landscape, sensor, portrait or all)
