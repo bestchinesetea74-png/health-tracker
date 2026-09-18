@@ -23,12 +23,24 @@ jobs:
         sudo apt-get install -y \
           build-essential git python3-pip ccache \
           libncurses5 libncurses5:i386 libstdc++6:i386 zlib1g:i386 \
-          openjdk-17-jdk unzip libltdl-dev
+          openjdk-17-jdk unzip libltdl-dev libffi-dev
 
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install --upgrade cython==0.29.36 buildozer
+
+    - name: Pre-download SDK and Fix Aidl
+      run: |
+        # Запускаем buildozer один раз, чтобы он скачал базовый SDK, и сразу прерываем или даем ему подготовить папки
+        yes | buildozer android debug || true
+        
+        # Принудительно устанавливаем рабочие build-tools 33.0.2, где гарантированно есть aidl
+        if [ -d "/home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin" ]; then
+          export PATH=$PATH:/home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin
+          yes | sdkmanager --licenses || true
+          sdkmanager "build-tools;33.0.2"
+        fi
 
     - name: Build with Buildozer
       run: |
