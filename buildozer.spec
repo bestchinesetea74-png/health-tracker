@@ -35,3 +35,12 @@ log_level = 2
 
 # (int) Display warning if buildozer is run as root (0 = False, 1 = True)
 warn_on_root = 1
+
+# Указываем стабильную версию Android API
+android.api = 33
+
+# Минимальная поддерживаемая версия Android
+android.min_api = 21
+
+# Жестко фиксируем проверенную версию build-tools, чтобы avoid проблемы с 'Aidl not found'
+android.build_tools_version = 33.0.2
