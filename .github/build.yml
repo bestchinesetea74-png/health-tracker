@@ -3,7 +3,8 @@ name: CI
 on:
   push:
     branches: [ main, master ]
-
+    workflow_dispatch: # Позволяет запускать сборку кнопкой вручную
+    
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -39,3 +40,4 @@ jobs:
       with:
         name: package
         path: bin/*.apk
+        
