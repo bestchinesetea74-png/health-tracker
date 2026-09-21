@@ -30,9 +30,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install --upgrade cython==0.29.36 buildozer
 
-    - name: Build with Buildozer
-      run: |
-        buildozer -v android debug
+- name: Clean old buildozer cache
+  run: |
+    rm -rf .buildozer bin
+
+- name: Build with Buildozer
+  run: |
+    buildozer -v android debug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
