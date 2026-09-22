@@ -17,7 +17,7 @@ source.include_exts = py,png,jpg,json
 version = 0.1
 
 # (list) Application requirements
-requirements = python3,kivy,kivymd,pillow,google-api-python-client,google-auth,google-auth-oauthlib
+requirements = python3,kivy,kivymd,pillow
 
 # (str) Supported orientations (landscape, sensor, portrait or all)
 orientation = portrait
