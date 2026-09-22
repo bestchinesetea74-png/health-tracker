@@ -35,6 +35,8 @@ android.build_tools_version = 33.0.2
 android.accept_sdk_license = True
 ndk = 25b
 
+android.archs = arm64-v8a
+
 [buildozer]
 
 # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
