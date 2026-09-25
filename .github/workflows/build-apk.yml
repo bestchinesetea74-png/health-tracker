@@ -1,0 +1,38 @@
+name: Build APK
+
+on:
+  workflow_dispatch:      # запуск вручную кнопкой "Run workflow" на GitHub
+  push:
+    branches: [ main ]    # + при каждом пуше в main; уберите, если не нужно
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # credentials.json НИКОГДА не лежит в репозитории. Он существует
+      # только на диске раннера, только во время этого job'а, и исчезает
+      # вместе с виртуальной машиной сразу после сборки.
+      - name: Write credentials.json from secret
+        run: echo "${{ secrets.GDRIVE_CREDENTIALS_B64 }}" | base64 -d > credentials.json
+
+      - name: Build with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: stable
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthtracker-apk
+          path: ${{ steps.buildozer.outputs.filename }}
+
+      # На всякий случай подчищаем секрет с диска раннера, хотя ВМ и так
+      # уничтожается целиком сразу после job'а.
+      - name: Cleanup
+        if: always()
+        run: rm -f credentials.json
