@@ -1,0 +1,59 @@
+name: Build APK
+
+on:
+  workflow_dispatch:      # запуск вручную кнопкой "Run workflow" на GitHub
+  push:
+    branches: [ main ]    # + при каждом пуше в main; уберите, если не нужно
+
+jobs:
+  build:
+    # Пин конкретной LTS-версии Ubuntu, а не "latest" — чтобы сборка не
+    # ломалась каждый раз, когда GitHub тихо переключает runner на более
+    # новый (и ещё не всеми поддерживаемый) релиз Ubuntu.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # credentials.json НИКОГДА не лежит в репозитории. Он существует
+      # только на диске раннера, только во время этого job'а, и исчезает
+      # вместе с виртуальной машиной сразу после сборки.
+      - name: Write credentials.json from secret
+        run: echo "${{ secrets.GDRIVE_CREDENTIALS_B64 }}" | base64 -d > credentials.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # openjdk-17-jdk ставим прямо из официальных репозиториев Ubuntu 22.04
+      # (он там есть "из коробки"), БЕЗ стороннего PPA ppa:openjdk-r/ppa —
+      # именно этот PPA сейчас не отдаёт Release-файл для свежих релизов
+      # Ubuntu и валил сборку через buildozer-action.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip openjdk-17-jdk python3-pip \
+            autoconf libtool pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev cmake \
+            libffi-dev libssl-dev automake build-essential
+
+      - name: Install Buildozer
+        run: pip install --upgrade buildozer cython
+
+      - name: Build with Buildozer
+        run: buildozer -v android debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthtracker-apk
+          path: bin/*.apk
+
+      # На всякий случай подчищаем секрет с диска раннера, хотя ВМ и так
+      # уничтожается целиком сразу после job'а.
+      - name: Cleanup
+        if: always()
+        run: rm -f credentials.json
