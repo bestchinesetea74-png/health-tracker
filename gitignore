@@ -1,0 +1,13 @@
+# Секретный ключ сервис-аккаунта Google — никогда не коммитить!
+credentials.json
+
+# Локальные данные трекера (у каждого своя копия, синхронизируется через Drive)
+tracker_history.json
+
+# Артефакты сборки buildozer
+.buildozer/
+bin/
+*.apk
+
+__pycache__/
+*.pyc
