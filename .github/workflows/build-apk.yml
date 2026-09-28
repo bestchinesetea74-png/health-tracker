@@ -43,8 +43,24 @@ jobs:
       - name: Install Buildozer
         run: pip install --upgrade buildozer cython
 
+      # Без -v: подробный режим давал ~28000+ строк, и GitHub обрезал
+      # лог вместе с самой ошибкой. Полный вывод пишем в build.log.
       - name: Build with Buildozer
-        run: buildozer -v android debug
+        run: |
+          set -o pipefail
+          buildozer android debug 2>&1 | tee build.log
+
+      # Если сборка упала — показываем хвост лога прямо в интерфейсе.
+      - name: Show last lines of build log
+        if: failure()
+        run: tail -n 150 build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
