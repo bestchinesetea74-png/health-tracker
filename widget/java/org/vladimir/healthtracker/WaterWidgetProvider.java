@@ -293,7 +293,9 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         text.setColor(textColor);
         text.setTypeface(Typeface.DEFAULT_BOLD);
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(h * 0.30f);
+        text.setTextSize(h * 0.22f);
+        float maxLabelWidth = w * 0.82f;
+        fitTextSize(text, label, maxLabelWidth, 7f * density);
         Paint.FontMetrics fm = text.getFontMetrics();
         float cy = h / 2f - (fm.ascent + fm.descent) / 2f;
         cv.drawText(label, w / 2f, cy, text);
@@ -305,12 +307,27 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     // Отрисовка: капсула-индикатор ("stadium")
     // ------------------------------------------------------------------
 
+    /** Уменьшает textSize у paint, пока строка не влезет в maxWidth.
+     *  Нужно, потому что капсула теперь узкая, а числа "выпито/цель" могут
+     *  быть как двух-, так и четырёхзначными в зависимости от настроек
+     *  пользователя. */
+    private static void fitTextSize(Paint paint, String text, float maxWidth, float minSize) {
+        float size = paint.getTextSize();
+        while (size > minSize && paint.measureText(text) > maxWidth) {
+            size -= 1f;
+            paint.setTextSize(size);
+        }
+    }
+
     /** Капсула с дугой прогресса по контуру и цифрами "выпито/цель" внутри. */
     private static Bitmap stadiumBitmap(int water, int target, int accent, int trackColor,
                                          int textMain, int textSub, float density) {
-        int w = Math.round(70 * density);
-        int h = Math.round(76 * density);
-        float stroke = 3.2f * density;
+        // Узкая и высокая капсула: ширина заметно меньше высоты, поэтому
+        // при scaleType="fitCenter" она растягивается по всей доступной
+        // высоте виджета, а не превращается в почти квадрат.
+        int w = Math.round(46 * density);
+        int h = Math.round(92 * density);
+        float stroke = 3f * density;
 
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
@@ -349,22 +366,28 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         }
 
         // Цифры внутри капсулы: сверху крупное "выпито", снизу мелкое "/цель"
+        float maxTextWidth = w - stroke * 2.4f; // не залезать на дорожку прогресса
+
+        String waterStr = String.valueOf(water);
         Paint big = new Paint(Paint.ANTI_ALIAS_FLAG);
         big.setColor(textMain);
         big.setTypeface(Typeface.DEFAULT_BOLD);
         big.setTextAlign(Paint.Align.CENTER);
-        big.setTextSize(h * 0.20f);
+        big.setTextSize(h * 0.155f);
+        fitTextSize(big, waterStr, maxTextWidth, 8f * density);
 
+        String targetStr = "/" + target;
         Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
         small.setColor(textSub);
         small.setTypeface(Typeface.DEFAULT);
         small.setTextAlign(Paint.Align.CENTER);
-        small.setTextSize(h * 0.13f);
+        small.setTextSize(h * 0.105f);
+        fitTextSize(small, targetStr, maxTextWidth, 6f * density);
 
         float cx = w / 2f;
         float cy = h / 2f;
-        cv.drawText(String.valueOf(water), cx, cy - 1 * density, big);
-        cv.drawText("/" + target, cx, cy + small.getTextSize() + 1 * density, small);
+        cv.drawText(waterStr, cx, cy - 1 * density, big);
+        cv.drawText(targetStr, cx, cy + small.getTextSize() + 2 * density, small);
 
         return bmp;
     }
