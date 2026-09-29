@@ -10,7 +10,10 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PathMeasure;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.widget.RemoteViews;
 
@@ -26,8 +29,18 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Виджет "Вода": показывает выпитое за сегодня, объём стакана и прогресс
- * к дневной цели. Кнопки: -50 / +50 (объём стакана), - / + (стаканы).
+ * Виджет "Вода".
+ *
+ * Слева 2/3 ширины — четыре одинаковые кнопки (-50 / +50 объём стакана,
+ * - / + стакан воды), поровну распределённые по этому пространству.
+ * Справа 1/3 — капсула ("stadium"): по её контуру бежит дуга прогресса
+ * к дневной цели, а внутри капсулы — цифры "выпито / цель".
+ *
+ * Кнопки и капсула рисуются через Canvas в отдельные Bitmap (а не через
+ * setColorFilter поверх общей белой фигуры), поэтому цвет текста и фона
+ * всегда подбираются под тему явно и не бьются друг с другом на "тёмных"
+ * темах — раньше именно смешивание двух одинаковых белых цветов гасило
+ * подписи на кнопках в Dark/AMOLED.
  *
  * Данные читаются и пишутся прямо в tracker_history.json (тот же файл, что
  * и у Python-приложения). Виджет меняет ТОЛЬКО:
@@ -175,7 +188,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     }
 
     // ------------------------------------------------------------------
-    // Отрисовка
+    // Состояние и тема
     // ------------------------------------------------------------------
 
     private static final class State {
@@ -220,21 +233,145 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         return 0xFF009688; // teal
     }
 
-    private static Bitmap progressBitmap(float fraction, int trackColor, int fillColor) {
-        int w = 400, h = 12;
+    /** Цвета, зависящие от темы. Подбираются так, чтобы фон и текст ВСЕГДА
+     *  были контрастны — никакого смешивания "белого с белым". */
+    private static final class Theme {
+        int cardBg;
+        int neutralBtnBg;   // полупрозрачный, накладывается поверх cardBg
+        int neutralBtnText;
+        int primaryBtnText; // текст на акцентной (+вода) кнопке — всегда белый
+        int trackColor;     // фон дорожки прогресса в капсуле
+        int textMain;
+        int textSub;
+    }
+
+    private static Theme themeFor(String themeName) {
+        Theme t = new Theme();
+        boolean light = "Light".equals(themeName);
+        boolean amoled = "AMOLED".equals(themeName);
+        t.primaryBtnText = 0xFFFFFFFF;
+        if (light) {
+            t.cardBg = 0xF2F2F2F2;
+            t.neutralBtnBg = 0x14000000;   // ~8% чёрного поверх светлой карточки
+            t.neutralBtnText = 0xFF1B1B1B;
+            t.trackColor = 0x1F000000;
+            t.textMain = 0xFF1B1B1B;
+            t.textSub = 0xFF555555;
+        } else {
+            t.cardBg = amoled ? 0xF2000000 : 0xE61E1E1E;
+            t.neutralBtnBg = 0x33FFFFFF;   // ~20% белого — теперь рисуется на
+                                             // ПРОЗРАЧНОМ bitmap, а не поверх
+                                             // белой фигуры, поэтому реально
+                                             // полупрозрачный, а не "белый на белом"
+            t.neutralBtnText = 0xFFFFFFFF;
+            t.trackColor = 0x33FFFFFF;
+            t.textMain = 0xFFFFFFFF;
+            t.textSub = 0xFFBBBBBB;
+        }
+        return t;
+    }
+
+    // ------------------------------------------------------------------
+    // Отрисовка: кнопки
+    // ------------------------------------------------------------------
+
+    /** Рисует одну кнопку (скруглённый прямоугольник + подпись) в bitmap.
+     *  bgColor/textColor приходят уже готовыми под тему, так что кнопка
+     *  всегда читаема. */
+    private static Bitmap buttonBitmap(String label, int bgColor, int textColor, float density) {
+        int w = Math.round(64 * density);
+        int h = Math.round(76 * density);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        float r = h / 2f;
-        p.setColor(trackColor);
-        cv.drawRoundRect(new RectF(0, 0, w, h), r, r, p);
-        float fw = Math.max(0f, Math.min(1f, fraction)) * w;
-        if (fw > 0) {
-            p.setColor(fillColor);
-            cv.drawRoundRect(new RectF(0, 0, Math.max(fw, h), h), r, r, p);
-        }
+
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bg.setColor(bgColor);
+        float r = Math.min(w, h) * 0.30f;
+        cv.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
+
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setColor(textColor);
+        text.setTypeface(Typeface.DEFAULT_BOLD);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(h * 0.30f);
+        Paint.FontMetrics fm = text.getFontMetrics();
+        float cy = h / 2f - (fm.ascent + fm.descent) / 2f;
+        cv.drawText(label, w / 2f, cy, text);
+
         return bmp;
     }
+
+    // ------------------------------------------------------------------
+    // Отрисовка: капсула-индикатор ("stadium")
+    // ------------------------------------------------------------------
+
+    /** Капсула с дугой прогресса по контуру и цифрами "выпито/цель" внутри. */
+    private static Bitmap stadiumBitmap(int water, int target, int accent, int trackColor,
+                                         int textMain, int textSub, float density) {
+        int w = Math.round(70 * density);
+        int h = Math.round(76 * density);
+        float stroke = 3.2f * density;
+
+        Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(bmp);
+
+        float inset = stroke / 2f + 0.5f * density;
+        RectF rect = new RectF(inset, inset, w - inset, h - inset);
+        float radius = rect.width() / 2f; // полностью скруглённые торцы = капсула
+
+        Path full = new Path();
+        full.addRoundRect(rect, radius, radius, Path.Direction.CW);
+
+        Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
+        track.setStyle(Paint.Style.STROKE);
+        track.setStrokeWidth(stroke);
+        track.setStrokeCap(Paint.Cap.ROUND);
+        track.setColor(trackColor);
+        cv.drawPath(full, track);
+
+        float fraction = target > 0 ? Math.max(0f, Math.min(1f, (float) water / target)) : 0f;
+        boolean done = water >= target;
+        if (fraction > 0.003f) {
+            PathMeasure pm = new PathMeasure(full, true);
+            float len = pm.getLength();
+            Path progress = new Path();
+            pm.getSegment(0, len * fraction, progress, true);
+            // Известный обходной путь: без rLineTo(0,0) сегмент от
+            // PathMeasure иногда не отрисовывается на некоторых прошивках.
+            progress.rLineTo(0, 0);
+
+            Paint progPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            progPaint.setStyle(Paint.Style.STROKE);
+            progPaint.setStrokeWidth(stroke);
+            progPaint.setStrokeCap(Paint.Cap.ROUND);
+            progPaint.setColor(done ? 0xFF2ECC71 : accent);
+            cv.drawPath(progress, progPaint);
+        }
+
+        // Цифры внутри капсулы: сверху крупное "выпито", снизу мелкое "/цель"
+        Paint big = new Paint(Paint.ANTI_ALIAS_FLAG);
+        big.setColor(textMain);
+        big.setTypeface(Typeface.DEFAULT_BOLD);
+        big.setTextAlign(Paint.Align.CENTER);
+        big.setTextSize(h * 0.20f);
+
+        Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
+        small.setColor(textSub);
+        small.setTypeface(Typeface.DEFAULT);
+        small.setTextAlign(Paint.Align.CENTER);
+        small.setTextSize(h * 0.13f);
+
+        float cx = w / 2f;
+        float cy = h / 2f;
+        cv.drawText(String.valueOf(water), cx, cy - 1 * density, big);
+        cv.drawText("/" + target, cx, cy + small.getTextSize() + 1 * density, small);
+
+        return bmp;
+    }
+
+    // ------------------------------------------------------------------
+    // Сборка RemoteViews
+    // ------------------------------------------------------------------
 
     private static int pendingFlags() {
         int f = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -267,57 +404,41 @@ public class WaterWidgetProvider extends AppWidgetProvider {
 
     private static RemoteViews buildViews(Context c) {
         State s = readState(c);
-        RemoteViews rv = new RemoteViews(c.getPackageName(), R.layout.widget_water);
-
-        boolean light = "Light".equals(s.theme);
-        boolean amoled = "AMOLED".equals(s.theme);
-        int bg = light ? 0xF2F2F2F2 : (amoled ? 0xF2000000 : 0xE61E1E1E);
-        int textMain = light ? 0xFF1B1B1B : 0xFFFFFFFF;
-        int textSub = light ? 0xFF555555 : 0xFFBBBBBB;
-        int btnNeutral = light ? 0x22000000 : 0x33FFFFFF;
-        int track = light ? 0x22000000 : 0x33FFFFFF;
+        Theme th = themeFor(s.theme);
         int accent = accentColor(s.palette);
-        boolean done = s.water >= s.target;
-        int fill = done ? 0xFF2ECC71 : accent;
+        float density = c.getResources().getDisplayMetrics().density;
 
-        rv.setInt(R.id.bg, "setColorFilter", bg);
+        RemoteViews rv = new RemoteViews(c.getPackageName(), R.layout.widget_water);
+        rv.setInt(R.id.bg, "setColorFilter", th.cardBg);
 
-        if (s.ok) {
-            rv.setTextViewText(R.id.water_text, s.water + " / " + s.target);
-            rv.setTextViewText(R.id.glass_text, "мл, стакан " + s.glass);
-            rv.setImageViewBitmap(R.id.progress,
-                    progressBitmap((float) s.water / s.target, track, fill));
-        } else {
-            rv.setTextViewText(R.id.water_text, "—");
-            rv.setTextViewText(R.id.glass_text, "нет данных");
-            rv.setImageViewBitmap(R.id.progress, progressBitmap(0f, track, fill));
+        if (!s.ok) {
+            // Файл базы повреждён/недоступен: не рискуем рисовать случайные
+            // числа, показываем максимально нейтральный минимум.
+            s.water = 0;
         }
-        rv.setTextColor(R.id.water_text, textMain);
-        rv.setTextColor(R.id.glass_text, textSub);
 
-        // Кнопки: подписи и цвета
-        rv.setTextViewText(R.id.btn_water_minus_txt, "\u2212" + s.glass);
-        rv.setTextViewText(R.id.btn_water_plus_txt, "+" + s.glass);
-        rv.setTextColor(R.id.btn_glass_minus_txt, textMain);
-        rv.setTextColor(R.id.btn_glass_plus_txt, textMain);
-        rv.setTextColor(R.id.btn_water_minus_txt, textMain);
-        rv.setTextColor(R.id.btn_water_plus_txt, 0xFFFFFFFF);
+        rv.setImageViewBitmap(R.id.btn_glass_minus_img,
+                buttonBitmap("\u221250", th.neutralBtnBg, th.neutralBtnText, density));
+        rv.setImageViewBitmap(R.id.btn_glass_plus_img,
+                buttonBitmap("+50", th.neutralBtnBg, th.neutralBtnText, density));
+        rv.setImageViewBitmap(R.id.btn_water_minus_img,
+                buttonBitmap("\u2212" + s.glass, th.neutralBtnBg, th.neutralBtnText, density));
+        rv.setImageViewBitmap(R.id.btn_water_plus_img,
+                buttonBitmap("+" + s.glass, accent, th.primaryBtnText, density));
 
-        rv.setInt(R.id.btn_glass_minus_bg, "setColorFilter", btnNeutral);
-        rv.setInt(R.id.btn_glass_plus_bg, "setColorFilter", btnNeutral);
-        rv.setInt(R.id.btn_water_minus_bg, "setColorFilter", btnNeutral);
-        rv.setInt(R.id.btn_water_plus_bg, "setColorFilter", accent);
+        rv.setImageViewBitmap(R.id.stadium_img,
+                stadiumBitmap(s.water, s.target, accent, th.trackColor, th.textMain, th.textSub, density));
 
-        rv.setOnClickPendingIntent(R.id.btn_glass_minus, actionIntent(c, ACTION_GLASS_MINUS, 1));
-        rv.setOnClickPendingIntent(R.id.btn_glass_plus, actionIntent(c, ACTION_GLASS_PLUS, 2));
-        rv.setOnClickPendingIntent(R.id.btn_water_minus, actionIntent(c, ACTION_WATER_MINUS, 3));
-        rv.setOnClickPendingIntent(R.id.btn_water_plus, actionIntent(c, ACTION_WATER_PLUS, 4));
+        rv.setOnClickPendingIntent(R.id.btn_glass_minus_img, actionIntent(c, ACTION_GLASS_MINUS, 1));
+        rv.setOnClickPendingIntent(R.id.btn_glass_plus_img, actionIntent(c, ACTION_GLASS_PLUS, 2));
+        rv.setOnClickPendingIntent(R.id.btn_water_minus_img, actionIntent(c, ACTION_WATER_MINUS, 3));
+        rv.setOnClickPendingIntent(R.id.btn_water_plus_img, actionIntent(c, ACTION_WATER_PLUS, 4));
 
-        // Тап по тексту слева открывает приложение
+        // Тап по капсуле открывает приложение
         Intent launch = c.getPackageManager().getLaunchIntentForPackage(c.getPackageName());
         if (launch != null) {
             PendingIntent open = PendingIntent.getActivity(c, 5, launch, pendingFlags());
-            rv.setOnClickPendingIntent(R.id.info, open);
+            rv.setOnClickPendingIntent(R.id.stadium_img, open);
         }
         return rv;
     }
