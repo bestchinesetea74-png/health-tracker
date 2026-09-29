@@ -1,14 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Подсветка нажатия для кнопок: маска — скруглённый прямоугольник,
-     примерно повторяющий форму, нарисованную в Bitmap внутри кнопки.
-     Без этой маски системная подсветка рисуется прямоугольником на всю
-     ячейку и вылезает за пределы видимой кнопки. -->
-<ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#3DFFFFFF">
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#FFFFFFFF" />
-            <corners android:radius="19dp" />
-        </shape>
-    </item>
+<!--  ВАЖНО: у item обязателен android:id="@android:id/mask" — без него
+     Android рисует эту фигуру как постоянный видимый слой (а не только
+     как маску для подсветки при нажатии), и она перекрывает сплошным
+     белым цветом всё содержимое кнопки. Именно это и вызвало баг с
+     белыми плашками вместо кнопок.  -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#3DFFFFFF">
+<item android:id="@android:id/mask">
+<shape android:shape="rectangle">
+<solid android:color="@android:color/white"/>
+<corners android:radius="19dp"/>
+</shape>
+</item>
 </ripple>
