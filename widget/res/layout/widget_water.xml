@@ -14,144 +14,81 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="6dp">
 
+        <!-- Левые 2/3 виджета: 4 кнопки поровну -->
         <LinearLayout
-            android:id="@+id/info"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:paddingLeft="4dp"
-            android:paddingRight="4dp">
+            android:layout_height="match_parent"
+            android:layout_weight="2"
+            android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/water_text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:text="0 / 2000"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:textStyle="bold" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp">
+                <ImageView
+                    android:id="@+id/btn_glass_minus_img"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitCenter"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </FrameLayout>
 
-            <TextView
-                android:id="@+id/glass_text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:text="мл, стакан 250"
-                android:textColor="#BBBBBB"
-                android:textSize="11sp" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp">
+                <ImageView
+                    android:id="@+id/btn_glass_plus_img"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitCenter"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </FrameLayout>
 
-            <ImageView
-                android:id="@+id/progress"
-                android:layout_width="match_parent"
-                android:layout_height="5dp"
-                android:layout_marginTop="4dp"
-                android:scaleType="fitXY" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp">
+                <ImageView
+                    android:id="@+id/btn_water_minus_img"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitCenter"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp">
+                <ImageView
+                    android:id="@+id/btn_water_plus_img"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitCenter"
+                    android:foreground="?android:attr/selectableItemBackground" />
+            </FrameLayout>
         </LinearLayout>
 
+        <!-- Правая 1/3: капсула-индикатор с прогрессом и цифрами внутри -->
         <FrameLayout
-            android:id="@+id/btn_glass_minus"
-            android:layout_width="36dp"
-            android:layout_height="44dp"
-            android:layout_marginLeft="3dp"
-            android:foreground="?android:attr/selectableItemBackground">
-
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp">
             <ImageView
-                android:id="@+id/btn_glass_minus_bg"
+                android:id="@+id/stadium_img"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="fitXY"
-                android:src="@drawable/widget_btn_shape" />
-
-            <TextView
-                android:id="@+id/btn_glass_minus_txt"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:text="−50"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-        </FrameLayout>
-
-        <FrameLayout
-            android:id="@+id/btn_glass_plus"
-            android:layout_width="36dp"
-            android:layout_height="44dp"
-            android:layout_marginLeft="3dp"
-            android:foreground="?android:attr/selectableItemBackground">
-
-            <ImageView
-                android:id="@+id/btn_glass_plus_bg"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitXY"
-                android:src="@drawable/widget_btn_shape" />
-
-            <TextView
-                android:id="@+id/btn_glass_plus_txt"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:text="+50"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-        </FrameLayout>
-
-        <FrameLayout
-            android:id="@+id/btn_water_minus"
-            android:layout_width="48dp"
-            android:layout_height="44dp"
-            android:layout_marginLeft="8dp"
-            android:foreground="?android:attr/selectableItemBackground">
-
-            <ImageView
-                android:id="@+id/btn_water_minus_bg"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitXY"
-                android:src="@drawable/widget_btn_shape" />
-
-            <TextView
-                android:id="@+id/btn_water_minus_txt"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:text="−250"
-                android:textColor="#FFFFFF"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-        </FrameLayout>
-
-        <FrameLayout
-            android:id="@+id/btn_water_plus"
-            android:layout_width="48dp"
-            android:layout_height="44dp"
-            android:layout_marginLeft="3dp"
-            android:foreground="?android:attr/selectableItemBackground">
-
-            <ImageView
-                android:id="@+id/btn_water_plus_bg"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitXY"
-                android:src="@drawable/widget_btn_shape" />
-
-            <TextView
-                android:id="@+id/btn_water_plus_txt"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:text="+250"
-                android:textColor="#FFFFFF"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:scaleType="fitCenter"
+                android:foreground="?android:attr/selectableItemBackground" />
         </FrameLayout>
     </LinearLayout>
 </FrameLayout>
