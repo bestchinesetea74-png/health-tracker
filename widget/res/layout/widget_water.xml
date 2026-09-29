@@ -11,13 +11,30 @@
         android:scaleType="fitXY"
         android:src="@drawable/widget_bg_shape" />
 
+    <!-- Единый зазор используется одинаково: как отступ от края виджета,
+         так и между капсулой и кнопками, и между самими кнопками
+         (у каждой ячейки одинаковый layout_margin, без отдельного padding
+         на контейнере). -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="horizontal"
-        android:padding="6dp">
+        android:orientation="horizontal">
 
-        <!-- Левые 2/3 виджета: 4 кнопки поровну -->
+        <!-- Левая 1/3: капсула, вытянутая по вертикали на всю высоту -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp">
+            <ImageView
+                android:id="@+id/stadium_img"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitCenter"
+                android:foreground="@drawable/widget_stadium_ripple" />
+        </FrameLayout>
+
+        <!-- Правые 2/3: 4 кнопки поровну -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
@@ -28,67 +45,53 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_margin="2dp">
+                android:layout_margin="3dp">
                 <ImageView
                     android:id="@+id/btn_glass_minus_img"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:scaleType="fitCenter"
-                    android:foreground="?android:attr/selectableItemBackground" />
+                    android:foreground="@drawable/widget_btn_ripple" />
             </FrameLayout>
 
             <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_margin="2dp">
+                android:layout_margin="3dp">
                 <ImageView
                     android:id="@+id/btn_glass_plus_img"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:scaleType="fitCenter"
-                    android:foreground="?android:attr/selectableItemBackground" />
+                    android:foreground="@drawable/widget_btn_ripple" />
             </FrameLayout>
 
             <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_margin="2dp">
+                android:layout_margin="3dp">
                 <ImageView
                     android:id="@+id/btn_water_minus_img"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:scaleType="fitCenter"
-                    android:foreground="?android:attr/selectableItemBackground" />
+                    android:foreground="@drawable/widget_btn_ripple" />
             </FrameLayout>
 
             <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_margin="2dp">
+                android:layout_margin="3dp">
                 <ImageView
                     android:id="@+id/btn_water_plus_img"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:scaleType="fitCenter"
-                    android:foreground="?android:attr/selectableItemBackground" />
+                    android:foreground="@drawable/widget_btn_ripple" />
             </FrameLayout>
         </LinearLayout>
-
-        <!-- Правая 1/3: капсула-индикатор с прогрессом и цифрами внутри -->
-        <FrameLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_marginStart="4dp">
-            <ImageView
-                android:id="@+id/stadium_img"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitCenter"
-                android:foreground="?android:attr/selectableItemBackground" />
-        </FrameLayout>
     </LinearLayout>
 </FrameLayout>
