@@ -1,13 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Подсветка для капсулы: радиус скругления взят заведомо больше половины
-     любой стороны, система сама обрезает его до максимума — получается
-     форма stadium (полностью скруглённые торцы) при любом реальном размере. -->
-<ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#3DFFFFFF">
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#FFFFFFFF" />
-            <corners android:radius="200dp" />
-        </shape>
-    </item>
+<!--  Тот же фикс: shape помечена как android:id="@android:id/mask", иначе
+     она рисуется постоянно и перекрывает капсулу сплошной белой заливкой.  -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#3DFFFFFF">
+<item android:id="@android:id/mask">
+<shape android:shape="rectangle">
+<solid android:color="@android:color/white"/>
+<corners android:radius="200dp"/>
+</shape>
+</item>
 </ripple>
