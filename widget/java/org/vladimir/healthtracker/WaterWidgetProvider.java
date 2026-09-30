@@ -197,6 +197,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         int target = 2000;
         String palette = "teal";
         String theme = "Dark";
+        String accentHex = ""; // реальный theme_cls.primaryColor из приложения, "#RRGGBB"
         boolean ok = true;
     }
 
@@ -211,6 +212,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
                     s.target = settings.optInt("water_target_val", 2000);
                     s.palette = settings.optString("app_palette", "teal");
                     s.theme = settings.optString("app_theme_style", "Dark");
+                    s.accentHex = settings.optString("widget_accent_hex", "");
                 }
                 JSONObject day = root.optJSONObject(todayKey());
                 if (day != null) {
@@ -231,6 +233,23 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         if ("purple".equals(palette)) return 0xFF9C27B0;
         if ("red".equals(palette)) return 0xFFF44336;
         return 0xFF009688; // teal
+    }
+
+    /** Предпочитаем реальный цвет, который приложение сохранило из
+     *  theme_cls.primaryColor (см. widget_accent_hex в settings) — так
+     *  оттенок в виджете гарантированно совпадает с приложением, вместо
+     *  приблизительной таблицы по имени палитры. Таблица остаётся только
+     *  как запасной вариант на случай самого первого запуска, когда
+     *  приложение ещё ни разу не сохраняло базу. */
+    private static int resolveAccent(String accentHex, String palette) {
+        if (accentHex != null && accentHex.length() >= 7 && accentHex.charAt(0) == '#') {
+            try {
+                return 0xFF000000 | (Integer.parseInt(accentHex.substring(1, 7), 16) & 0xFFFFFF);
+            } catch (NumberFormatException ignored) {
+                // упадём на запасной вариант ниже
+            }
+        }
+        return accentColor(palette);
     }
 
     /** Цвета, зависящие от темы. Подбираются так, чтобы фон и текст ВСЕГДА
@@ -279,8 +298,12 @@ public class WaterWidgetProvider extends AppWidgetProvider {
      *  bgColor/textColor приходят уже готовыми под тему, так что кнопка
      *  всегда читаема. */
     private static Bitmap buttonBitmap(String label, int bgColor, int textColor, float density) {
-        int w = Math.round(64 * density);
-        int h = Math.round(76 * density);
+        // Квадратная форма: с прямоугольным bitmap (было 64x76) кнопка
+        // никогда не выглядела квадратной при scaleType="fitCenter",
+        // какой бы ни была реальная ячейка — форма всегда повторяла
+        // пропорции самой картинки.
+        int w = Math.round(72 * density);
+        int h = Math.round(72 * density);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
 
@@ -322,11 +345,12 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     /** Капсула с дугой прогресса по контуру и цифрами "выпито/цель" внутри. */
     private static Bitmap stadiumBitmap(int water, int target, int accent, int trackColor,
                                          int textMain, float density) {
-        // Та же высота, что и у кнопок (76dp), чтобы капсула не выходила за
-        // их размер по вертикали. Форма шире, чем выше — горизонтальный
-        // stadium, цифры внутри идут одной строкой, а не друг под другом.
-        int w = Math.round(100 * density);
-        int h = Math.round(76 * density);
+        // Та же высота, что и у квадратных кнопок (72dp). По ширине
+        // капсула компактнее, чем раньше (100 -> 66dp) — покороче, как
+        // просили, но всё ещё оставляет место под "500/1200" в одну строку
+        // благодаря автоподбору размера шрифта ниже.
+        int w = Math.round(66 * density);
+        int h = Math.round(72 * density);
         float stroke = 3f * density;
 
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -421,7 +445,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     private static RemoteViews buildViews(Context c) {
         State s = readState(c);
         Theme th = themeFor(s.theme);
-        int accent = accentColor(s.palette);
+        int accent = resolveAccent(s.accentHex, s.palette);
         float density = c.getResources().getDisplayMetrics().density;
 
         RemoteViews rv = new RemoteViews(c.getPackageName(), R.layout.widget_water);
@@ -440,7 +464,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         rv.setImageViewBitmap(R.id.btn_water_minus_img,
                 buttonBitmap("\u2212" + s.glass, th.neutralBtnBg, th.neutralBtnText, density));
         rv.setImageViewBitmap(R.id.btn_water_plus_img,
-                buttonBitmap("+" + s.glass, accent, th.primaryBtnText, density));
+                buttonBitmap("+" + s.glass, th.neutralBtnBg, th.neutralBtnText, density));
 
         rv.setImageViewBitmap(R.id.stadium_img,
                 stadiumBitmap(s.water, s.target, accent, th.trackColor, th.textMain, density));
