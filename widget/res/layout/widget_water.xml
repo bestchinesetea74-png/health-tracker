@@ -11,20 +11,19 @@
         android:scaleType="fitXY"
         android:src="@drawable/widget_bg_shape" />
 
-    <!-- Единый зазор используется одинаково: как отступ от края виджета,
-         так и между капсулой и кнопками, и между самими кнопками
-         (у каждой ячейки одинаковый layout_margin, без отдельного padding
-         на контейнере). -->
+    <!-- Пять одинаковых кнопок в ряд: табло с целью — такая же кнопка,
+         как остальные (тоже открывает приложение по тапу), поэтому у всех
+         пяти ячеек одинаковый вес и одинаковый отступ (3dp) — и от края
+         виджета, и между собой. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="horizontal">
 
-        <!-- Левая часть: компактная капсула, той же высоты, что кнопки -->
         <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="2"
+            android:layout_weight="1"
             android:layout_margin="3dp">
             <ImageView
                 android:id="@+id/stadium_img"
@@ -34,64 +33,56 @@
                 android:foreground="@drawable/widget_stadium_ripple" />
         </FrameLayout>
 
-        <!-- Правая часть: 4 квадратные кнопки поровну -->
-        <LinearLayout
+        <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="9"
-            android:orientation="horizontal">
-
-            <FrameLayout
-                android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_margin="3dp">
+            <ImageView
+                android:id="@+id/btn_glass_minus_img"
+                android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_margin="3dp">
-                <ImageView
-                    android:id="@+id/btn_glass_minus_img"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="fitCenter"
-                    android:foreground="@drawable/widget_btn_ripple" />
-            </FrameLayout>
+                android:scaleType="fitCenter"
+                android:foreground="@drawable/widget_btn_ripple" />
+        </FrameLayout>
 
-            <FrameLayout
-                android:layout_width="0dp"
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp">
+            <ImageView
+                android:id="@+id/btn_glass_plus_img"
+                android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_margin="3dp">
-                <ImageView
-                    android:id="@+id/btn_glass_plus_img"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="fitCenter"
-                    android:foreground="@drawable/widget_btn_ripple" />
-            </FrameLayout>
+                android:scaleType="fitCenter"
+                android:foreground="@drawable/widget_btn_ripple" />
+        </FrameLayout>
 
-            <FrameLayout
-                android:layout_width="0dp"
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp">
+            <ImageView
+                android:id="@+id/btn_water_minus_img"
+                android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_margin="3dp">
-                <ImageView
-                    android:id="@+id/btn_water_minus_img"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="fitCenter"
-                    android:foreground="@drawable/widget_btn_ripple" />
-            </FrameLayout>
+                android:scaleType="fitCenter"
+                android:foreground="@drawable/widget_btn_ripple" />
+        </FrameLayout>
 
-            <FrameLayout
-                android:layout_width="0dp"
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp">
+            <ImageView
+                android:id="@+id/btn_water_plus_img"
+                android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_margin="3dp">
-                <ImageView
-                    android:id="@+id/btn_water_plus_img"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="fitCenter"
-                    android:foreground="@drawable/widget_btn_ripple" />
-            </FrameLayout>
-        </LinearLayout>
+                android:scaleType="fitCenter"
+                android:foreground="@drawable/widget_btn_ripple" />
+        </FrameLayout>
     </LinearLayout>
 </FrameLayout>
