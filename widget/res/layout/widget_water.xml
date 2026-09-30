@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- root: wrap_content по высоте + center_vertical — карточка занимает
+     только столько места по вертикали, сколько нужно самим кнопкам, а не
+     растягивается на весь ряд, который выделил лаунчер. Раньше именно
+     из-за match_parent сверху/снизу получались непропорционально большие
+     поля по сравнению с боковыми отступами. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="wrap_content"
+    android:layout_gravity="center_vertical">
 
     <ImageView
         android:id="@+id/bg"
@@ -11,76 +17,90 @@
         android:scaleType="fitXY"
         android:src="@drawable/widget_bg_shape" />
 
-    <!-- Пять одинаковых кнопок в ряд: табло с целью — такая же кнопка,
-         как остальные (тоже открывает приложение по тапу), поэтому у всех
-         пяти ячеек одинаковый вес и одинаковый отступ (3dp) — и от края
-         виджета, и между собой. -->
+    <!-- EDGE (6dp) — отступ от внешних краёв виджета (сверху, снизу, слева
+         у первой кнопки, справа у последней). BETWEEN (4dp = 2+2dp) —
+         зазор между соседними кнопками, специально чуть меньше EDGE. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="horizontal">
 
         <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_margin="5dp">
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="2dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp">
             <ImageView
                 android:id="@+id/stadium_img"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:scaleType="fitCenter"
                 android:foreground="@drawable/widget_stadium_ripple" />
         </FrameLayout>
 
         <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_margin="5dp">
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp">
             <ImageView
                 android:id="@+id/btn_glass_minus_img"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:scaleType="fitCenter"
                 android:foreground="@drawable/widget_btn_ripple" />
         </FrameLayout>
 
         <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_margin="5dp">
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp">
             <ImageView
                 android:id="@+id/btn_glass_plus_img"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:scaleType="fitCenter"
                 android:foreground="@drawable/widget_btn_ripple" />
         </FrameLayout>
 
         <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_margin="5dp">
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp">
             <ImageView
                 android:id="@+id/btn_water_minus_img"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:scaleType="fitCenter"
                 android:foreground="@drawable/widget_btn_ripple" />
         </FrameLayout>
 
         <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_margin="5dp">
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="6dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp">
             <ImageView
                 android:id="@+id/btn_water_plus_img"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:scaleType="fitCenter"
                 android:foreground="@drawable/widget_btn_ripple" />
         </FrameLayout>
