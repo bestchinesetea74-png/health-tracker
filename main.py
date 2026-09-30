@@ -418,20 +418,32 @@ class DayCell(MDBoxLayout):
 
 
 
-def _theme_accent(alpha=1.0):
-    """Реальный акцентный цвет темы (M3 primaryColor) с заданной альфой.
+_PALETTE_ACCENT_RGB = {
+    # Постоянный насыщенный акцент на каждую палитру, одинаковый в любой
+    # теме (Light/Dark/AMOLED). Значения — классическая Material "500":
+    # раньше акцент брался из theme_cls.primaryColor, но в тёмной теме
+    # эта M3-роль намеренно светлая/приглушённая (так и задумано в
+    # спецификации ради контраста на тёмном фоне) — красный превращался
+    # в бронзовый, синий в лавандовый и т.п. Здесь цвет фиксированный и
+    # не зависит от темы. Эти же значения (в hex) использует виджет как
+    # запасной вариант, пока приложение ещё ни разу не сохраняло базу.
+    "teal":   (0.000, 0.588, 0.533),
+    "indigo": (0.247, 0.318, 0.710),
+    "blue":   (0.129, 0.588, 0.953),
+    "orange": (1.000, 0.596, 0.000),
+    "purple": (0.612, 0.153, 0.690),
+    "red":    (0.957, 0.263, 0.212),
+}
 
-    Раньше 'заливка' у кнопок/вкладок/иконок была жёстко зашита одним
-    и тем же teal-цветом и почти не реагировала на выбор палитры —
-    заметно менялся только фон экрана (Primary Color Accent выглядел
-    как "чуть другой оттенок"). Теперь берём актуальный primaryColor,
-    чтобы выбранная палитра была хорошо видна по всему приложению.
-    """
+
+def _theme_accent(alpha=1.0):
+    """Фиксированный акцентный цвет по имени палитры (см. _PALETTE_ACCENT_RGB)."""
     try:
-        r, g, b, *_ = MDApp.get_running_app().theme_cls.primaryColor
-        return (r, g, b, alpha)
+        palette = MDApp.get_running_app().app_palette
     except Exception:
-        return (0.20, 0.45, 0.55, alpha)
+        palette = "teal"
+    r, g, b = _PALETTE_ACCENT_RGB.get(palette, _PALETTE_ACCENT_RGB["teal"])
+    return (r, g, b, alpha)
 
 
 def _theme_is_light():
@@ -959,11 +971,10 @@ class HealthTrackerApp(MDApp):
             "app_theme_style": self.app_theme_style,
             "water_icon_name": self.water_icon_name,
             "vitamin_names": dict(self.vitamin_names),
-            # Готовый M3-цвет из theme_cls.primaryColor в виде "#RRGGBB".
-            # Виджет читает именно его, а не пересчитывает цвет по имени
-            # палитры сам — так оттенок гарантированно совпадает с тем,
-            # что реально видно в приложении (Material You считает цвет
-            # динамически, а не по фиксированной таблице).
+            # Фиксированный акцент по палитре (см. _theme_accent) как
+            # "#RRGGBB". Виджет читает именно это значение, а не
+            # пересчитывает цвет по имени палитры сам — так оттенок
+            # гарантированно совпадает с тем, что видно в приложении.
             "widget_accent_hex": self._accent_hex_for_widget(),
         }
 
@@ -976,10 +987,10 @@ class HealthTrackerApp(MDApp):
             self._upload_debouncer.trigger()
 
     def _accent_hex_for_widget(self):
-        """Текущий theme_cls.primaryColor (тот самый, что рисует само
-        приложение) как "#RRGGBB" — для виджета на рабочем столе."""
+        """Тот же фиксированный акцент, что и во всём приложении
+        (см. _theme_accent), как "#RRGGBB" — для виджета на рабочем столе."""
         try:
-            r, g, b, *_ = self.theme_cls.primaryColor
+            r, g, b, *_ = _theme_accent(1.0)
             return "#%02X%02X%02X" % (
                 max(0, min(255, round(r * 255))),
                 max(0, min(255, round(g * 255))),
