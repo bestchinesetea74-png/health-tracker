@@ -24,7 +24,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="3dp">
+            android:layout_margin="5dp">
             <ImageView
                 android:id="@+id/stadium_img"
                 android:layout_width="match_parent"
@@ -37,7 +37,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="3dp">
+            android:layout_margin="5dp">
             <ImageView
                 android:id="@+id/btn_glass_minus_img"
                 android:layout_width="match_parent"
@@ -50,7 +50,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="3dp">
+            android:layout_margin="5dp">
             <ImageView
                 android:id="@+id/btn_glass_plus_img"
                 android:layout_width="match_parent"
@@ -63,7 +63,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="3dp">
+            android:layout_margin="5dp">
             <ImageView
                 android:id="@+id/btn_water_minus_img"
                 android:layout_width="match_parent"
@@ -76,7 +76,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="3dp">
+            android:layout_margin="5dp">
             <ImageView
                 android:id="@+id/btn_water_plus_img"
                 android:layout_width="match_parent"
