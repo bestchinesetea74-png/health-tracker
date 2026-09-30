@@ -302,8 +302,8 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         // никогда не выглядела квадратной при scaleType="fitCenter",
         // какой бы ни была реальная ячейка — форма всегда повторяла
         // пропорции самой картинки.
-        int w = Math.round(72 * density);
-        int h = Math.round(72 * density);
+        int w = Math.round(62 * density);
+        int h = Math.round(62 * density);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
 
@@ -314,7 +314,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
 
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
         text.setColor(textColor);
-        text.setTypeface(Typeface.DEFAULT_BOLD);
+        text.setTypeface(Typeface.DEFAULT);
         text.setTextAlign(Paint.Align.CENTER);
         text.setTextSize(h * 0.22f);
         float maxLabelWidth = w * 0.82f;
@@ -345,12 +345,13 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     /** Капсула с дугой прогресса по контуру и цифрами "выпито/цель" внутри. */
     private static Bitmap stadiumBitmap(int water, int target, int accent, int trackColor,
                                          int textMain, float density) {
-        // Та же высота, что и у квадратных кнопок (72dp). По ширине
-        // капсула компактнее, чем раньше (100 -> 66dp) — покороче, как
-        // просили, но всё ещё оставляет место под "500/1200" в одну строку
-        // благодаря автоподбору размера шрифта ниже.
-        int w = Math.round(66 * density);
-        int h = Math.round(72 * density);
+        // Табло с целью — это, по сути, пятая кнопка (тоже открывает
+        // приложение по тапу), поэтому у неё теперь ровно тот же размер,
+        // что и у остальных (62dp). На квадратном holste радиус в половину
+        // стороны сам по себе даёт идеальный круг — отдельная "stadium"
+        // форма (вытянутый овал) больше не нужна.
+        int w = Math.round(62 * density);
+        int h = Math.round(62 * density);
         float stroke = 3f * density;
 
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -358,7 +359,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
 
         float inset = stroke / 2f + 0.5f * density;
         RectF rect = new RectF(inset, inset, w - inset, h - inset);
-        float radius = Math.min(rect.width(), rect.height()) / 2f; // скруглённые торцы капсулы
+        float radius = Math.min(rect.width(), rect.height()) / 2f; // на квадрате = круг
 
         Path full = new Path();
         full.addRoundRect(rect, radius, radius, Path.Direction.CW);
@@ -389,17 +390,17 @@ public class WaterWidgetProvider extends AppWidgetProvider {
             cv.drawPath(progress, progPaint);
         }
 
-        // Цифры одной строкой: "выпито/цель" — сама капсула теперь шире,
-        // чем выше, поэтому текст идёт горизонтально, а не в два яруса.
-        float maxTextWidth = w - stroke * 3f; // не залезать на дорожку прогресса
+        // Цифры одной строкой: "выпито/цель". Шрифт без жирности — как и
+        // на остальных кнопках.
+        float maxTextWidth = w - stroke * 3.4f; // не залезать на дорожку прогресса
 
         String combined = water + "/" + target;
         Paint main = new Paint(Paint.ANTI_ALIAS_FLAG);
         main.setColor(textMain);
-        main.setTypeface(Typeface.DEFAULT_BOLD);
+        main.setTypeface(Typeface.DEFAULT);
         main.setTextAlign(Paint.Align.CENTER);
-        main.setTextSize(h * 0.30f);
-        fitTextSize(main, combined, maxTextWidth, 8f * density);
+        main.setTextSize(h * 0.26f);
+        fitTextSize(main, combined, maxTextWidth, 7f * density);
 
         float cx = w / 2f;
         Paint.FontMetrics fm = main.getFontMetrics();
