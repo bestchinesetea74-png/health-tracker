@@ -302,8 +302,8 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         // никогда не выглядела квадратной при scaleType="fitCenter",
         // какой бы ни была реальная ячейка — форма всегда повторяла
         // пропорции самой картинки.
-        int w = Math.round(62 * density);
-        int h = Math.round(62 * density);
+        int w = Math.round(58 * density);
+        int h = Math.round(58 * density);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
 
@@ -347,11 +347,11 @@ public class WaterWidgetProvider extends AppWidgetProvider {
                                          int textMain, float density) {
         // Табло с целью — это, по сути, пятая кнопка (тоже открывает
         // приложение по тапу), поэтому у неё теперь ровно тот же размер,
-        // что и у остальных (62dp). На квадратном holste радиус в половину
+        // что и у остальных (58dp). На квадратном холсте радиус в половину
         // стороны сам по себе даёт идеальный круг — отдельная "stadium"
         // форма (вытянутый овал) больше не нужна.
-        int w = Math.round(62 * density);
-        int h = Math.round(62 * density);
+        int w = Math.round(58 * density);
+        int h = Math.round(58 * density);
         float stroke = 3f * density;
 
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
