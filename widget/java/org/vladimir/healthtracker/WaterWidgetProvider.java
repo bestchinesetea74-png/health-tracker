@@ -270,7 +270,7 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         boolean amoled = "AMOLED".equals(themeName);
         t.primaryBtnText = 0xFFFFFFFF;
         if (light) {
-            t.cardBg = 0xF2F2F2F2;
+            t.cardBg = 0xF2F5F0E5; // тёплый кремовый, а не холодный серо-белый
             t.neutralBtnBg = 0x14000000;   // ~8% чёрного поверх светлой карточки
             t.neutralBtnText = 0xFF1B1B1B;
             t.trackColor = 0x1F000000;
