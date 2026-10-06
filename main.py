@@ -838,9 +838,16 @@ class HealthTrackerApp(MDApp):
         Clock.schedule_once(lambda dt: self.build_calendar_screen(), 0.2)
         Clock.schedule_once(lambda dt: self.build_settings_screen(), 0.3)
 
-        # Первичная синхронизация с Google Drive — в фоновом потоке,
-        # чтобы не блокировать отрисовку UI при старте.
-        threading.Thread(target=self._background_initial_sync, daemon=True).start()
+        # ВРЕМЕННО ОТКЛЮЧЕНО: раньше здесь при каждом запуске сразу же (без
+        # участия пользователя) вызывался self.auth.get_access_token(),
+        # который через pyjnius трогает классы Google Play Services — это
+        # совпадает по времени с нативным крэшем (SIGSEGV в "Jit thread
+        # pool"), который видно в логе. Пока это не подтверждено/не
+        # починено, синхронизация с Drive запускается ТОЛЬКО по явному
+        # нажатию «Sync» или «Войти через Google» — см. manual_sync()
+        # и sign_in_google().
+        #
+        # threading.Thread(target=self._background_initial_sync, daemon=True).start()
 
     def _file_mtime(self):
         try:
