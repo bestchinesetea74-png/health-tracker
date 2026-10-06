@@ -16,11 +16,26 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # credentials.json НИКОГДА не лежит в репозитории. Он существует
-      # только на диске раннера, только во время этого job'а, и исчезает
-      # вместе с виртуальной машиной сразу после сборки.
-      - name: Write credentials.json from secret
-        run: echo "${{ secrets.GDRIVE_CREDENTIALS_B64 }}" | base64 -d > credentials.json
+      # Обход известного бага некоторых раннеров GitHub Actions: DNS
+      # отдаёт IPv6-адрес (AAAA) для сервера, с которого python-for-android
+      # качает исходники какой-то recipe, а исходящий IPv6 на раннере не
+      # маршрутизируется — urlretrieve падает с "Network is unreachable"
+      # после 4 попыток. Отключаем IPv6 на время сборки, чтобы Python шёл
+      # через IPv4, который работает исправно.
+      - name: Disable IPv6 (workaround for broken IPv6 routing on some runners)
+        run: |
+          sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
+          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+
+      # Стабильный debug-keystore для входа через Google (Play Services
+      # Authorization API сверяет вход по паре "имя пакета + SHA-1"). Если
+      # не подложить сюда свой файл, Android-инструменты на каждом чистом
+      # раннере генерируют СЛУЧАЙНЫЙ debug.keystore — SHA-1 будет меняться
+      # от сборки к сборке, и вход через Google будет работать через раз.
+      - name: Use stable debug keystore
+        run: |
+          mkdir -p ~/.android
+          cp ci/debug.keystore ~/.android/debug.keystore
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -76,9 +91,3 @@ jobs:
         with:
           name: healthtracker-apk
           path: bin/*.apk
-
-      # На всякий случай подчищаем секрет с диска раннера, хотя ВМ и так
-      # уничтожается целиком сразу после job'а.
-      - name: Cleanup
-        if: always()
-        run: rm -f credentials.json
