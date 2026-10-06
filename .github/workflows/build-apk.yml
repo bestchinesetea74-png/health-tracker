@@ -90,6 +90,17 @@ jobs:
         if: failure()
         run: tail -n 1500 build.log | grep -v '^#     ' | tail -n 200
 
+      # Отдельно: при сетевых сбоях строка "Downloading ... from <URL>"
+      # обычно успевает "уехать" выше среза из предыдущего шага (её
+      # отделяют десятки строк повторов + Python-трейсбек + дамп
+      # переменных окружения). Ищем её явно по всему логу, чтобы сразу
+      # было видно, какой именно recipe и с какого URL не скачался.
+      - name: Show download attempts (on failure)
+        if: failure()
+        run: |
+          echo "--- Все строки 'Downloading' из полного лога ---"
+          grep -n -i "Downloading\|Download failed" build.log || echo "(ничего не найдено)"
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
