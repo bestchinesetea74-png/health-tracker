@@ -16,17 +16,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Обход известного бага некоторых раннеров GitHub Actions: DNS
-      # отдаёт IPv6-адрес (AAAA) для сервера, с которого python-for-android
-      # качает исходники какой-то recipe, а исходящий IPv6 на раннере не
-      # маршрутизируется — urlretrieve падает с "Network is unreachable"
-      # после 4 попыток. Отключаем IPv6 на время сборки, чтобы Python шёл
-      # через IPv4, который работает исправно.
-      - name: Disable IPv6 (workaround for broken IPv6 routing on some runners)
-        run: |
-          sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
-          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
-
       # Стабильный debug-keystore для входа через Google (Play Services
       # Authorization API сверяет вход по паре "имя пакета + SHA-1"). Если
       # не подложить сюда свой файл, Android-инструменты на каждом чистом
@@ -41,6 +30,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # Обход известного бага некоторых раннеров GitHub Actions: DNS
+      # отдаёт IPv6-адрес (AAAA) для сервера, с которого python-for-android
+      # качает исходники какой-то recipe, а исходящий IPv6 на раннере не
+      # работает — urlretrieve падает с "Network is unreachable" / "Cannot
+      # assign requested address" после 4 попыток. Отключение IPv6 через
+      # sysctl оказалось недостаточным (даёт другую, но ту же по сути
+      # ошибку) — вместо этого патчим socket.getaddrinfo через
+      # sitecustomize.py, чтобы Python (включая дочерний процесс
+      # pythonforandroid.toolchain, запускаемый этим же интерпретатором)
+      # вообще не пытался резолвить домены в IPv6.
+      - name: Force IPv4-only DNS resolution for Python
+        run: |
+          SITE_DIR=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          cat > "$SITE_DIR/sitecustomize.py" <<'PY'
+          import socket
+          _orig_getaddrinfo = socket.getaddrinfo
+          def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+              return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+          socket.getaddrinfo = _ipv4_only_getaddrinfo
+          PY
+          echo "sitecustomize.py written to $SITE_DIR"
 
       # У раннера JAVA_HOME по умолчанию = Temurin 11, а Gradle/Android
       # Gradle Plugin в свежих python-for-android требуют Java 17 —
