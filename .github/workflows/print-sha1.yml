@@ -1,0 +1,22 @@
+name: Print keystore SHA-1
+
+# Запускается вручную (кнопка Run workflow). Ничего не собирает и не меняет:
+# только читает ci/debug.keystore и показывает его SHA-1.
+on:
+  workflow_dispatch:
+
+jobs:
+  sha1:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Print SHA-1 of ci/debug.keystore
+        run: |
+          ls -l ci/debug.keystore
+          keytool -list -v -keystore ci/debug.keystore \
+            -alias androiddebugkey -storepass android | grep -E "Alias|SHA1"
+          echo "## SHA-1 для Google Cloud Console" >> "$GITHUB_STEP_SUMMARY"
+          keytool -list -v -keystore ci/debug.keystore \
+            -alias androiddebugkey -storepass android | grep "SHA1" >> "$GITHUB_STEP_SUMMARY"
