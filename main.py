@@ -294,6 +294,7 @@ class PlayServicesDriveAuth:
                     except Exception as e:
                         print(f"[DriveSync] getAuthorizationResultFromIntent failed: {e}")
                         outcome["ok"] = False
+                        outcome["err"] = f"consent: {e}"
                     done_event.set()
 
                 android_activity.bind(on_activity_result=_on_activity_result)
@@ -308,6 +309,7 @@ class PlayServicesDriveAuth:
                         )
                     except Exception as e:
                         print(f"[DriveSync] startIntentSenderForResult failed: {e}")
+                        outcome["err"] = f"launch: {e}"
                         android_activity.unbind(on_activity_result=_on_activity_result)
                         done_event.set()
 
@@ -315,7 +317,8 @@ class PlayServicesDriveAuth:
                 # Пользователь может долго выбирать аккаунт — ждём до 3 минут.
                 if not done_event.wait(180):
                     print("[DriveSync] sign-in timed out waiting for activity result")
-                self._last_error = None if outcome["ok"] else "consent_failed"
+                    outcome.setdefault("err", "timeout")
+                self._last_error = None if outcome["ok"] else outcome.get("err", "consent_failed")
                 on_done(outcome["ok"])
             except Exception as e:
                 self._last_error = str(e)
@@ -797,6 +800,19 @@ class HealthTrackerApp(MDApp):
         except Exception as e:
             print(f"[Storage] flag write failed: {e}")
 
+    def _auto_prompt_path(self):
+        return os.path.join(os.path.dirname(self.json_path), "drive_prompted.flag")
+
+    def _auto_prompt_done(self):
+        return os.path.exists(self._auto_prompt_path())
+
+    def _mark_auto_prompt_done(self):
+        try:
+            with open(self._auto_prompt_path(), "w", encoding="utf-8") as f:
+                f.write("1")
+        except Exception as e:
+            print(f"[Storage] prompt flag write failed: {e}")
+
     def build(self):
         self.json_path = self._resolve_json_path()
         self.drive_sync = GoogleDriveSync()
@@ -840,8 +856,16 @@ class HealthTrackerApp(MDApp):
 
         # Автосинхронизация при старте — только если пользователь уже
         # входил через Google (есть флаг). Иначе Play Services не трогаем.
-        if AUTO_SYNC_ON_START and self._is_signed_in_flag():
-            threading.Thread(target=self._sync_now, daemon=True).start()
+        if AUTO_SYNC_ON_START:
+            if self._is_signed_in_flag():
+                # Уже входили раньше: токен берётся тихо, без каких-либо окон.
+                threading.Thread(target=self._sync_now, daemon=True).start()
+            elif not self._auto_prompt_done():
+                # Первый запуск: один раз сами показываем системное окно
+                # выбора аккаунта. Дальше всё работает без участия
+                # пользователя. Если откажется — кнопка остаётся для ручного входа.
+                self._mark_auto_prompt_done()
+                Clock.schedule_once(lambda dt: self.sign_in_google(), 1.5)
 
     def _file_mtime(self):
         try:
@@ -919,14 +943,15 @@ class HealthTrackerApp(MDApp):
         def _on_done(ok):
             def _update(_dt):
                 if label:
-                    label.text = "✓ Подключено" if ok else "Не удалось, нажмите ещё раз"
+                    label.text = "✓ Google" if ok else "Повторить"
                 if ok:
                     print("[Android] Google sign-in OK, syncing...")
                     self._set_signed_in_flag(True)
                     self.manual_sync()
                 else:
-                    print("[Android] Google sign-in failed or cancelled.")
-                    self._set_sync_status("Вход в Google не выполнен")
+                    err = str(self.drive_sync.auth._last_error or "unknown")
+                    print(f"[Android] Google sign-in failed or cancelled: {err}")
+                    self._set_sync_status(f"Вход не выполнен: {err[:160]}")
             Clock.schedule_once(_update, 0)
 
         self.drive_sync.sign_in_interactive(_on_done)
