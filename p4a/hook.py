@@ -15,6 +15,28 @@ kivy/python-for-android issue #2905).
 """
 from pathlib import Path
 
+# --- Обход недоступного download.savannah.gnu.org для recipe freetype ---
+# python-for-android качает freetype с download.savannah.gnu.org, который
+# по факту (подтверждено независимо чужим проектом в те же дни) бывает
+# недоступен ЧАСАМИ с раннеров GitHub Actions — "Connection timed out"
+# после всех повторных попыток, это не наша сеть и не блокировка IP.
+# FreeType официально зеркалируется на SourceForge — подменяем url прямо
+# на уже созданном объекте recipe (а не переписываем/наследуем класс
+# целиком), чтобы не трогать логику сборки самой библиотеки.
+# Код ниже выполняется СРАЗУ при импорте этого файла — то есть раньше,
+# чем toolchain начинает что-либо скачивать (--hook передаётся и в
+# команду create, не только в aab/apk).
+try:
+    from pythonforandroid.recipes.freetype import recipe as _freetype_recipe
+    _OLD_URL = _freetype_recipe.url
+    _freetype_recipe.url = (
+        "https://downloads.sourceforge.net/project/freetype/freetype2/"
+        "{version}/freetype-{version}.tar.gz"
+    )
+    print(f"[hook] freetype url patched: {_OLD_URL} -> {_freetype_recipe.url}")
+except Exception as e:
+    print(f"[hook] WARNING: could not patch freetype recipe url: {e}")
+
 RECEIVER_XML = """
     <receiver
         android:name="org.vladimir.healthtracker.WaterWidgetProvider"
