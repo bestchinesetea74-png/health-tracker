@@ -229,7 +229,9 @@ class PlayServicesDriveAuth:
         ArrayList = autoclass("java.util.ArrayList")
         scopes = ArrayList()
         scopes.add(Scope(SCOPE_DRIVE_APPDATA))
-        return AuthorizationRequest.Builder().setRequestedScopes(scopes).build()
+        # Правильный вызов Authorization API: статический builder(),
+        # а не конструктор вложенного класса.
+        return AuthorizationRequest.builder().setRequestedScopes(scopes).build()
 
     def _authorize_sync(self, timeout_sec):
         """Блокирующий вызов authorize() + ожидание результата."""
@@ -268,17 +270,40 @@ class PlayServicesDriveAuth:
         доступны из любых потоков. Вызывать из on_start()."""
         try:
             from jnius import autoclass
-            self._classes()
-            for name in ("com.google.android.gms.tasks.Tasks",
-                         "java.util.concurrent.TimeUnit",
-                         "java.util.ArrayList"):
-                autoclass(name)
-            print("[DriveSync] Play Services classes preloaded OK")
-            return True
         except Exception as e:
-            self._last_error = f"preload: {e}"
-            print(f"[DriveSync] preload failed: {e}")
+            print(f"[DriveSync] preload skipped (no jnius): {e}")
             return False
+
+        # Классы, которые вызываются напрямую, И классы, которые pyjnius
+        # подгружает сам как типы возвращаемых значений методов
+        # (AuthorizationClient, Task, AuthorizationResult и т.д.).
+        names = (
+            "com.google.android.gms.auth.api.identity.Identity",
+            "com.google.android.gms.auth.api.identity.AuthorizationRequest",
+            "com.google.android.gms.auth.api.identity.AuthorizationRequest$Builder",
+            "com.google.android.gms.auth.api.identity.AuthorizationClient",
+            "com.google.android.gms.auth.api.identity.AuthorizationResult",
+            "com.google.android.gms.common.api.Scope",
+            "com.google.android.gms.common.api.ApiException",
+            "com.google.android.gms.tasks.Task",
+            "com.google.android.gms.tasks.Tasks",
+            "java.util.concurrent.TimeUnit",
+            "java.util.ArrayList",
+            "android.app.PendingIntent",
+            "android.content.IntentSender",
+        )
+        failed = []
+        for name in names:
+            try:
+                autoclass(name)
+            except Exception as e:
+                failed.append(name)
+                print(f"[DriveSync] preload failed for {name}: {str(e)[:200]}")
+        if failed:
+            self._last_error = f"preload: {len(failed)} classes failed, first: {failed[0]}"
+            return False
+        print("[DriveSync] Play Services classes preloaded OK")
+        return True
 
     def needs_consent(self):
         return self._last_error == "needs_consent"
