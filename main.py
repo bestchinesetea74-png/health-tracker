@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import base64
 import calendar
 import tempfile
 import shutil
@@ -12,15 +11,12 @@ import urllib.error
 import ssl
 from datetime import datetime
 
-import rsa as rsa_lib
-
 
 def _make_ssl_context():
     """SSL-контекст с корневыми сертификатами из certifi.
 
     На Android у встроенного Python нет системного набора CA, и любой
-    HTTPS-запрос падает с CERTIFICATE_VERIFY_FAILED (см. logcat:
-    'unable to get local issuer certificate'). certifi приносит свой
+    HTTPS-запрос падает с CERTIFICATE_VERIFY_FAILED. certifi приносит свой
     cacert.pem. Если certifi недоступен — стандартный контекст."""
     try:
         import certifi
@@ -42,8 +38,7 @@ def _err_details(e):
     except Exception:
         pass
     return str(e)
-from pyasn1.codec.der import decoder as der_decoder
-from pyasn1_modules.rfc5208 import PrivateKeyInfo
+
 
 from kivy.uix.floatlayout import FloatLayout
 from kivy.lang import Builder
@@ -53,8 +48,7 @@ from kivy.core.window import Window
 
 # На Android клавиатура иногда открывается только один раз: после того как
 # она закрылась (свайп/кнопка "назад"), Kivy иногда не понимает, что фокус
-# снят, и повторный тап по тому же MDTextField не вызывает клавиатуру снова
-# (помогает пересоздание виджета — отсюда и "помогает смена вкладки").
+# снят, и повторный тап по тому же MDTextField не вызывает клавиатуру снова.
 # 'below_target' — стандартное решение этой проблемы в Kivy на Android.
 Window.softinput_mode = "below_target"
 from kivy.graphics import Color, RoundedRectangle
@@ -74,6 +68,11 @@ from kivymd.uix.label import MDLabel, MDIcon
 # Чистые вспомогательные функции — вынесены отдельно от классов Kivy/Drive,
 # чтобы их можно было тестировать без запуска приложения или сети.
 # ---------------------------------------------------------------------------
+
+# Автосинхронизация при старте приложения (только если пользователь уже
+# входил через Google). Поставьте False, чтобы синхронизировать только
+# по кнопке «Sync».
+AUTO_SYNC_ON_START = True
 
 DEFAULT_SETTINGS = {
     "glass_volume": 250,
@@ -138,6 +137,19 @@ def atomic_write_json(path, data):
         return False
 
 
+def db_has_user_data(db):
+    """True, если в базе есть хоть одна запись за день (ключ-дата)."""
+    return any(k != "settings" for k in db.keys())
+
+
+def db_updated_at(db):
+    """Метка времени последнего изменения базы (epoch, секунды) или 0."""
+    try:
+        return float(db.get("settings", {}).get("updated_at", 0) or 0)
+    except Exception:
+        return 0.0
+
+
 class Debouncer:
     """Простой debounce-помощник поверх threading.Timer. Несколько быстрых
     вызовов trigger() приводят к одному вызову callback после delay секунд
@@ -170,28 +182,31 @@ class Debouncer:
 
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files"
-DEFAULT_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 # Персональная синхронизация: scope ограничен только скрытой папкой
-# приложения в Drive САМОГО пользователя (appDataFolder) — не полный
-# доступ к его Drive, и не наш общий сервисный аккаунт.
+# приложения в Drive САМОГО пользователя (appDataFolder). Приложение не
+# видит остальные файлы пользователя, а сам пользователь не видит этот
+# файл в обычном интерфейсе Drive (он хранится в «данных приложения»).
 SCOPE_DRIVE_APPDATA = "https://www.googleapis.com/auth/drive.appdata"
+
+
+class NoTokenError(RuntimeError):
+    """Нет токена Google: пользователь ещё не входил или отозвал доступ."""
 
 
 class PlayServicesDriveAuth:
     """Авторизация в Drive через официальный Authorization API из Google
-    Play Services (pyjnius), вместо сервисного аккаунта на всех.
+    Play Services (pyjnius).
 
-    Каждый вызов get_access_token() запрашивает токен у Play Services
-    заново: если согласие уже когда-то было дано, Play Services отдаёт
-    его МГНОВЕННО и без какого-либо экрана — сам кэширует и обновляет
-    токен внутри себя, нам не нужно хранить refresh token вообще.
-    Если согласия ещё не было — get_access_token() вернёт None, ничего
-    не показывая пользователю; показать системный экран согласия может
-    только sign_in_interactive(), и то лишь по явному нажатию кнопки.
+    get_access_token() каждый раз запрашивает токен у Play Services:
+    если согласие уже было дано, токен возвращается мгновенно и без UI
+    (Play Services сам кэширует и обновляет его, refresh token хранить
+    не нужно). Если согласия ещё не было — вернётся None; системный
+    экран согласия показывает только sign_in_interactive(), и только
+    по явному нажатию кнопки.
 
-    ВАЖНО: get_access_token() блокирующий (внутри Tasks.await) — вызывать
-    только из фонового потока, никогда из UI-потока Kivy.
+    ВАЖНО: get_access_token() блокирующий (внутри Tasks.await) —
+    вызывать только из фонового потока, никогда из UI-потока Kivy.
     """
 
     REQUEST_CODE_AUTHORIZE = 7001
@@ -217,10 +232,7 @@ class PlayServicesDriveAuth:
         return AuthorizationRequest.Builder().setRequestedScopes(scopes).build()
 
     def _authorize_sync(self, timeout_sec):
-        """Блокирующий вызов authorize() + ожидание результата. Работает
-        и для уже выданного согласия (мгновенно), и для случая, когда
-        согласия ещё не было (тогда result.hasResolution() == True,
-        и дальше нужен sign_in_interactive, а не этот метод)."""
+        """Блокирующий вызов authorize() + ожидание результата."""
         from jnius import autoclass
         activity, Identity, AuthorizationRequest, Scope = self._classes()
         Tasks = autoclass("com.google.android.gms.tasks.Tasks")
@@ -228,15 +240,13 @@ class PlayServicesDriveAuth:
         client = Identity.getAuthorizationClient(activity)
         request = self._build_request(AuthorizationRequest, Scope)
         task = client.authorize(request)
-        # "await" — зарезервированное слово в Python, Tasks.await(...)
-        # через точку был бы синтаксической ошибкой. Обходим через getattr.
+        # "await" — зарезервированное слово в Python, поэтому через getattr.
         task_await = getattr(Tasks, "await")
         result = task_await(task, timeout_sec, TimeUnit.SECONDS)
         return client, result
 
     def get_access_token(self, timeout_sec=20):
-        """Тихий (silent) запрос токена, без UI. None, если согласия
-        ещё не было — тогда нужен sign_in_interactive()."""
+        """Тихий запрос токена, без UI. None, если согласия ещё не было."""
         try:
             _client, result = self._authorize_sync(timeout_sec)
             if result.hasResolution():
@@ -254,11 +264,9 @@ class PlayServicesDriveAuth:
 
     def sign_in_interactive(self, on_done, timeout_sec=30):
         """Запускает системный экран выбора Google-аккаунта/согласия,
-        если он ещё нужен (если согласие уже есть — просто подтвердит
-        без UI). on_done(True/False) вызывается из ФОНОВОГО потока —
-        вызывающая сторона сама должна перейти в UI-поток Kivy
-        (Clock.schedule_once), если планирует трогать виджеты интерфейса.
-        """
+        если он ещё нужен. on_done(True/False) вызывается из ФОНОВОГО
+        потока — для работы с виджетами переходите в UI-поток через
+        Clock.schedule_once."""
         def _worker():
             try:
                 client, result = self._authorize_sync(timeout_sec)
@@ -304,7 +312,8 @@ class PlayServicesDriveAuth:
                         done_event.set()
 
                 _launch()
-                if not done_event.wait(timeout_sec + 15):
+                # Пользователь может долго выбирать аккаунт — ждём до 3 минут.
+                if not done_event.wait(180):
                     print("[DriveSync] sign-in timed out waiting for activity result")
                 self._last_error = None if outcome["ok"] else "consent_failed"
                 on_done(outcome["ok"])
@@ -317,9 +326,9 @@ class PlayServicesDriveAuth:
 
 
 class GoogleDriveSync:
-    """Синхронизация с Google Drive через прямые REST-вызовы Drive API v3
-    (без googleapiclient) и Service Account JWT-аутентификацию на чистом
-    Python (без google-auth/cryptography)."""
+    """Синхронизация с Google Drive пользователя через прямые REST-вызовы
+    Drive API v3 (без googleapiclient и google-auth). Файл базы лежит в
+    скрытой папке приложения (appDataFolder) в Drive самого пользователя."""
 
     def __init__(self, remote_filename="tracker_history.json"):
         self.remote_filename = remote_filename
@@ -327,14 +336,13 @@ class GoogleDriveSync:
         self.file_id = None  # кэшируем id после первого резолва — фикс дублей
 
     def sign_in_interactive(self, on_done):
-        """Проброс к PlayServicesDriveAuth — вызывать из обработчика
-        нажатия кнопки «Войти через Google»."""
+        """Вызывать из обработчика кнопки «Войти через Google»."""
         self.auth.sign_in_interactive(on_done)
 
     def _authed_request(self, method, url, headers=None, data=None, timeout=15):
         token = self.auth.get_access_token()
         if not token:
-            raise RuntimeError(
+            raise NoTokenError(
                 "No Google access token (not signed in yet or consent revoked)")
         req_headers = {"Authorization": f"Bearer {token}"}
         if headers:
@@ -344,10 +352,7 @@ class GoogleDriveSync:
 
     def _resolve_file_id(self):
         """Детерминированный поиск файла: при дублях берём самый старый
-        по createdTime и логируем ситуацию, вместо тихого выбора files[0]
-        в непредсказуемом порядке. Кэширует найденный id в self.file_id."""
-        if not self.auth:
-            return None
+        по createdTime. Кэширует найденный id в self.file_id."""
         try:
             query = urllib.parse.urlencode({
                 "q": f"name = '{self.remote_filename}' and trashed = false",
@@ -362,25 +367,23 @@ class GoogleDriveSync:
                 print(f"[DriveSync] Found '{f.get('name')}' id={f.get('id')} "
                       f"size={f.get('size')} created={f.get('createdTime')}")
             if len(files) > 1:
-                # Это личный appDataFolder самого пользователя — дубль
-                # возможен только при гонке между двумя его устройствами.
-                # Берём самый старый, чтобы оба устройства сошлись к
-                # одному и тому же файлу.
                 print(f"[DriveSync] Warning: found {len(files)} files "
                       f"named '{self.remote_filename}'. Taking the oldest.")
 
             files.sort(key=lambda f: f.get("createdTime", ""))
             self.file_id = files[0]["id"] if files else None
             return self.file_id
+        except NoTokenError:
+            raise
         except Exception as e:
             print(f"[DriveSync] Error resolving file id: {_err_details(e)}")
-            return None
+            raise
 
     def upload_file(self, local_filepath):
         """Синхронная выгрузка. Вызывающая сторона отвечает за то, чтобы
-        это не выполнялось в основном UI-потоке (см. Debouncer в App)."""
-        if not self.auth or not os.path.exists(local_filepath):
-            return
+        это не выполнялось в основном UI-потоке. Возвращает True/False."""
+        if not os.path.exists(local_filepath):
+            return False
         try:
             if not self.file_id:
                 self._resolve_file_id()
@@ -394,10 +397,10 @@ class GoogleDriveSync:
                     "PATCH", url, headers={"Content-Type": "application/json"}, data=content
                 ):
                     pass
-                print("[DriveSync] Android: DB updated on Drive.")
+                print("[DriveSync] DB updated on Drive.")
             else:
-                # Двухшаговое создание: сначала метаданные (имя файла),
-                # затем загрузка содержимого в уже созданный файл.
+                # Двухшаговое создание: сначала метаданные (имя файла и
+                # папка appDataFolder), затем загрузка содержимого.
                 meta = json.dumps({
                     "name": self.remote_filename,
                     "parents": ["appDataFolder"],
@@ -414,47 +417,51 @@ class GoogleDriveSync:
                     "PATCH", url, headers={"Content-Type": "application/json"}, data=content
                 ):
                     pass
-                print("[DriveSync] Android: DB created on Drive.")
+                print("[DriveSync] DB created on Drive.")
+            return True
+        except NoTokenError as e:
+            print(f"[DriveSync] Upload skipped: {e}")
+            return False
         except Exception as e:
             print(f"[DriveSync] Upload Error: {_err_details(e)}")
+            return False
 
     def download_file_safe(self):
-        """Безопасное скачивание: НЕ трогает локальный файл. Скачивает во
-        временный буфер в памяти, проверяет валидность JSON и возвращает
-        (True, data) при успехе или (False, None) при любой ошибке —
-        сетевой, HTTP или JSON-парсинга."""
-        if not self.auth:
-            return False, None
+        """Безопасное скачивание: НЕ трогает локальный файл.
+
+        Возвращает (status, data):
+          ("ok", dict)      — файл скачан и это валидный JSON-объект;
+          ("missing", None) — на Drive файла ещё нет;
+          ("no_auth", None) — нет токена (не вошли в Google);
+          ("error", None)   — сеть/HTTP/битый JSON."""
         try:
             if not self.file_id:
                 self._resolve_file_id()
             if not self.file_id:
-                return False, None
+                return "missing", None
 
-            with self._authed_request("GET", f"{DRIVE_API}/files/{self.file_id}?alt=media") as resp:
+            with self._authed_request(
+                "GET", f"{DRIVE_API}/files/{self.file_id}?alt=media"
+            ) as resp:
                 raw = resp.read()
 
             data = validate_remote_json(raw)
             if data is None:
                 print("[DriveSync] Download Error: remote file is not valid JSON, "
                       "local file kept unchanged.")
-                return False, None
-
-            return True, data
+                return "error", None
+            return "ok", data
+        except NoTokenError:
+            return "no_auth", None
         except Exception as e:
             print(f"[DriveSync] Download Error: {_err_details(e)}. Local file kept unchanged.")
-            return False, None
+            return "error", None
 
 
 class DayCell(MDBoxLayout):
     """Лёгкая ячейка календаря БЕЗ тяжёлой M3-графики MDButton (ripple,
     тени, несколько canvas-инструкций на кнопку). Просто цветной
-    прямоугольник + текст через kivy.graphics напрямую.
-
-    Причина: полноценные MDButton x42 (сетка 7x6), создаваемые все разом
-    за один кадр, вызывали нативный краш GPU-драйвера Adreno
-    (SIGSEGV, null pointer dereference внутри libGLESv2_adreno.so,
-    через kivy/graphics/vbo.so). Лёгкая замена снимает нагрузку на VBO."""
+    прямоугольник + текст через kivy.graphics напрямую."""
 
     def __init__(self, color, text, on_press=None, **kwargs):
         super().__init__(**kwargs)
@@ -481,16 +488,9 @@ class DayCell(MDBoxLayout):
         return super().on_touch_down(touch)
 
 
-
 _PALETTE_ACCENT_RGB = {
     # Постоянный насыщенный акцент на каждую палитру, одинаковый в любой
-    # теме (Light/Dark/AMOLED). Значения — классическая Material "500":
-    # раньше акцент брался из theme_cls.primaryColor, но в тёмной теме
-    # эта M3-роль намеренно светлая/приглушённая (так и задумано в
-    # спецификации ради контраста на тёмном фоне) — красный превращался
-    # в бронзовый, синий в лавандовый и т.п. Здесь цвет фиксированный и
-    # не зависит от темы. Эти же значения (в hex) использует виджет как
-    # запасной вариант, пока приложение ещё ни разу не сохраняло базу.
+    # теме (Light/Dark/AMOLED). Значения — классическая Material "500".
     "teal":   (0.000, 0.588, 0.533),
     "indigo": (0.247, 0.318, 0.710),
     "blue":   (0.129, 0.588, 0.953),
@@ -519,12 +519,10 @@ def _theme_is_light():
 
 def _refocus_keyboard(instance, value):
     """При закрытии системной клавиатуры не через потерю фокуса виджетом
-    (например, кнопкой 'назад' на Android) Kivy иногда не сбрасывает своё
-    внутреннее состояние — повторный тап ставит focus=True, но саму
-    клавиатуру заново не показывает (известный баг, см. kivy/kivy#5550
-    и #7698). Форсируем show_keyboard() при каждом получении фокуса;
-    try/except — на случай, если метод недоступен у конкретной версии
-    MDTextField, чтобы это не могло уронить приложение."""
+    Kivy иногда не сбрасывает своё внутреннее состояние — повторный тап
+    ставит focus=True, но клавиатуру заново не показывает. Форсируем
+    show_keyboard() при каждом получении фокуса; try/except — на случай,
+    если метод недоступен у конкретной версии MDTextField."""
     if value:
         def _show(dt):
             try:
@@ -582,20 +580,9 @@ class LightButton(MDBoxLayout):
 
 
 class LightIconButton(FloatLayout):
-    """Лёгкая icon-only кнопка без MDIconButton.
-
-    В KivyMD 2.0 M3-кнопки (включая MDIconButton) используют общий набор
-    поведений — ripple, state-layer, а для стилей с фоном (tonal/filled)
-    ещё и elevation/тень через Fbo/RenderContext. Замена MDButton и
-    MDNavigationBar на лёгкие аналоги не убрала краш (см. crash_log) —
-    значит источник тот же самый общий M3-механизм, просто через
-    MDIconButton. Здесь только круглая подложка (RoundedRectangle) и
-    иконка (MDIcon) — Fbo нет вообще.
-
-    База — FloatLayout, а не MDBoxLayout: BoxLayout применяет pos_hint
-    только по "поперечной" оси, поэтому иконка внутри него была смещена
-    от центра кнопки по главной оси. FloatLayout центрирует по обеим.
-    """
+    """Лёгкая icon-only кнопка без MDIconButton: только круглая подложка
+    (RoundedRectangle) и иконка (MDIcon). База — FloatLayout, чтобы иконка
+    центрировалась по обеим осям."""
 
     def __init__(self, icon="", tonal=False, on_release=None, **kwargs):
         kwargs.setdefault("size_hint", (None, None))
@@ -630,15 +617,8 @@ class LightIconButton(FloatLayout):
 
 
 class LightTabItem(MDBoxLayout):
-    """Лёгкая вкладка нижней навигации без MDNavigationBar/MDNavigationItem.
-
-    У MDNavigationBar в KivyMD 2.0 переключение активного "pill"-индикатора
-    рисуется через Fbo/RenderContext (морфинг подложки между вкладками).
-    Именно Fbo-код был на стеке краша (fbo.so, кадр внутри самой функции,
-    а не просто загруженная библиотека) при КАЖДОМ тапе по вкладке — даже
-    после того как экранный переход стал NoTransition. Здесь никакого Fbo
-    нет вообще: обычный RoundedRectangle-подсвет + иконка + подпись.
-    """
+    """Лёгкая вкладка нижней навигации без MDNavigationBar/MDNavigationItem
+    (никакого Fbo/RenderContext): RoundedRectangle-подсвет + иконка + подпись."""
 
     def __init__(self, icon="", text="", selected=False, on_release=None,
                  **kwargs):
@@ -744,6 +724,8 @@ class HealthTrackerApp(MDApp):
     app_theme_style = StringProperty("Dark")
     water_icon_name = StringProperty("water")
 
+    sync_status = StringProperty("")
+
     vitamin_names = DictProperty({
         "vit0": "Vitamin 1",
         "vit1": "Vitamin 2",
@@ -762,6 +744,10 @@ class HealthTrackerApp(MDApp):
 
     db_data = DictProperty({})
     json_path = StringProperty("tracker_history.json")
+
+    # Метка времени последнего локального изменения (epoch, секунды).
+    # Нужна, чтобы при синхронизации побеждала более свежая версия базы.
+    db_updated_at = 0.0
 
     # --- lifecycle ---------------------------------------------------
 
@@ -790,11 +776,32 @@ class HealthTrackerApp(MDApp):
                 print(f"[Storage] Migration failed: {e}")
         return new
 
+    # --- флаг «пользователь уже входил в Google» -----------------------
+    # Хранится отдельным файлом рядом с базой и НЕ синхронизируется.
+    # Пока флага нет, приложение вообще не трогает Play Services.
+
+    def _signed_in_flag_path(self):
+        return os.path.join(os.path.dirname(self.json_path), "drive_signed_in.flag")
+
+    def _is_signed_in_flag(self):
+        return os.path.exists(self._signed_in_flag_path())
+
+    def _set_signed_in_flag(self, value):
+        path = self._signed_in_flag_path()
+        try:
+            if value:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("1")
+            elif os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            print(f"[Storage] flag write failed: {e}")
+
     def build(self):
         self.json_path = self._resolve_json_path()
         self.drive_sync = GoogleDriveSync()
-        # Debounce на аплоад в облако (0.5–1.5с по спеке); сам вызов идёт
-        # внутри threading.Timer, то есть уже не в основном UI-потоке.
+        # Debounce на аплоад в облако; сам вызов идёт внутри threading.Timer,
+        # то есть уже не в основном UI-потоке.
         self._upload_debouncer = Debouncer(1.0, self._perform_cloud_upload)
 
         # Локальная загрузка — быстрая операция с диском, безопасна в build().
@@ -802,15 +809,8 @@ class HealthTrackerApp(MDApp):
         self.apply_visual_theme()
 
         root = Builder.load_string(KV)
-        # NoTransition вместо дефолтного (у MDScreenManager он рендерит оба
-        # экрана через FBO/RenderContext). Именно это FBO ловило момент
-        # пересборки тяжёлого дерева виджетов на следующем кадре после
-        # sm.current = ... и роняло Adreno-драйвер null pointer dereference
-        # в vbo.so/compiler.so/instructions.so (см. crash_log). Полный
-        # переход длится дольше одного кадра, поэтому Clock.schedule_once(0)
-        # ниже не успевал дождаться его завершения. Без FBO-перехода
-        # sm.current меняется мгновенно и без промежуточного GL-состояния —
-        # безопасно рекомпилировать canvas сразу.
+        # NoTransition вместо дефолтного: без FBO-перехода sm.current
+        # меняется мгновенно и безопасно для GPU-драйвера.
         root.ids.screen_manager.transition = NoTransition()
         self._build_nav_bar(root)
         return root
@@ -838,16 +838,10 @@ class HealthTrackerApp(MDApp):
         Clock.schedule_once(lambda dt: self.build_calendar_screen(), 0.2)
         Clock.schedule_once(lambda dt: self.build_settings_screen(), 0.3)
 
-        # ВРЕМЕННО ОТКЛЮЧЕНО: раньше здесь при каждом запуске сразу же (без
-        # участия пользователя) вызывался self.auth.get_access_token(),
-        # который через pyjnius трогает классы Google Play Services — это
-        # совпадает по времени с нативным крэшем (SIGSEGV в "Jit thread
-        # pool"), который видно в логе. Пока это не подтверждено/не
-        # починено, синхронизация с Drive запускается ТОЛЬКО по явному
-        # нажатию «Sync» или «Войти через Google» — см. manual_sync()
-        # и sign_in_google().
-        #
-        # threading.Thread(target=self._background_initial_sync, daemon=True).start()
+        # Автосинхронизация при старте — только если пользователь уже
+        # входил через Google (есть флаг). Иначе Play Services не трогаем.
+        if AUTO_SYNC_ON_START and self._is_signed_in_flag():
+            threading.Thread(target=self._sync_now, daemon=True).start()
 
     def _file_mtime(self):
         try:
@@ -869,8 +863,8 @@ class HealthTrackerApp(MDApp):
             return
         self._json_mtime = self._file_mtime()
         self._apply_remote_data(data)
-        if hasattr(self, "_upload_debouncer"):
-            self._upload_debouncer.trigger()
+        # Перезаписываем файл со свежей меткой времени и ставим аплоад.
+        self.save_database()
 
     def _notify_widget(self):
         """Просит виджет на рабочем столе перерисоваться (только Android)."""
@@ -890,20 +884,29 @@ class HealthTrackerApp(MDApp):
             print(f"[Widget] notify failed: {e}")
 
     def on_stop(self):
-        # Если приложение закрывается сразу после правки — не теряем
-        # отложенный аплоад молча, но и не блокируем закрытие надолго.
+        # Не теряем отложенный аплоад, но и не блокируем закрытие дольше
+        # чем на 3 секунды (если сети нет — просто отпускаем).
         if hasattr(self, "_upload_debouncer"):
             self._upload_debouncer.cancel()
-            self._perform_cloud_upload()
+            t = threading.Thread(target=self._perform_cloud_upload, daemon=True)
+            t.start()
+            t.join(3)
 
     # --- Google Drive sync (фоновые операции) -------------------------
 
-    def _background_initial_sync(self):
-        self._safe_download_and_apply()
+    def _set_sync_status(self, text):
+        """Безопасно (из любого потока) обновляет строку статуса."""
+        def _update(_dt):
+            self.sync_status = text
+            lbl = getattr(self, "_sync_label", None)
+            if lbl is not None:
+                lbl.text = text
+        Clock.schedule_once(_update, 0)
 
     def manual_sync(self):
         print("[Android] Manual sync requested...")
-        threading.Thread(target=self._perform_manual_sync, daemon=True).start()
+        self._set_sync_status("Синхронизация...")
+        threading.Thread(target=self._sync_now, daemon=True).start()
 
     def sign_in_google(self, button=None):
         """Обработчик кнопки «Войти через Google». Показывает системный
@@ -919,45 +922,70 @@ class HealthTrackerApp(MDApp):
                     label.text = "✓ Подключено" if ok else "Не удалось, нажмите ещё раз"
                 if ok:
                     print("[Android] Google sign-in OK, syncing...")
+                    self._set_signed_in_flag(True)
                     self.manual_sync()
                 else:
                     print("[Android] Google sign-in failed or cancelled.")
+                    self._set_sync_status("Вход в Google не выполнен")
             Clock.schedule_once(_update, 0)
 
         self.drive_sync.sign_in_interactive(_on_done)
 
-    def _perform_manual_sync(self):
-        self._safe_download_and_apply()
-        print("[Android] Manual sync complete!")
+    def _sync_now(self):
+        """Двусторонняя синхронизация (вызывать из фонового потока).
 
-    def _safe_download_and_apply(self):
-        """Качает данные с Drive без риска повредить локальный файл.
-        При любой ошибке (сеть, HTTP, невалидный JSON) локальный файл
-        и текущее состояние приложения остаются без изменений."""
+        Побеждает более свежая версия базы (по settings.updated_at):
+          - на Drive файла нет            -> загружаем локальный;
+          - на Drive новее                -> применяем облачный;
+          - локальный новее               -> загружаем локальный;
+          - локальная база пуста, облако нет -> применяем облачный.
+        При любой ошибке локальные данные не меняются."""
         if not hasattr(self, "drive_sync"):
             return
 
-        success, remote_data = self.drive_sync.download_file_safe()
-        if not success:
-            # Ошибка уже залогирована внутри download_file_safe.
+        status, remote = self.drive_sync.download_file_safe()
+
+        if status == "no_auth":
+            self._set_signed_in_flag(False)
+            self._set_sync_status("Нажмите «Войти через Google»")
+            return
+        if status == "error":
+            self._set_sync_status("Ошибка синхронизации (см. лог)")
             return
 
-        if not atomic_write_json(self.json_path, remote_data):
-            print("[DriveSync] Failed to persist downloaded data locally; "
-                  "keeping previous local file.")
+        if status == "missing":
+            if self.drive_sync.upload_file(self.json_path):
+                self._set_sync_status("Загружено на Google Drive")
+            else:
+                self._set_sync_status("Не удалось загрузить на Drive")
             return
 
-        self._json_mtime = self._file_mtime()
-        print("[DriveSync] Safe download completed and applied.")
-        Clock.schedule_once(lambda dt: self._apply_remote_data(remote_data))
+        # status == "ok"
+        remote_ts = db_updated_at(remote)
+        local_ts = self.db_updated_at
+        local_empty = not db_has_user_data(self.db_data)
+
+        if remote_ts > local_ts or (local_empty and db_has_user_data(remote)):
+            if not atomic_write_json(self.json_path, remote):
+                self._set_sync_status("Не удалось сохранить данные с Drive")
+                return
+            self._json_mtime = self._file_mtime()
+            Clock.schedule_once(lambda dt: self._apply_remote_data(remote))
+            self._set_sync_status("Данные получены с Google Drive")
+        elif local_ts > remote_ts:
+            if self.drive_sync.upload_file(self.json_path):
+                self._set_sync_status("Загружено на Google Drive")
+            else:
+                self._set_sync_status("Не удалось загрузить на Drive")
+        else:
+            self._set_sync_status("Синхронизировано")
 
     def _apply_remote_data(self, remote_data):
         """Выполняется в основном потоке (через Clock.schedule_once).
 
-        Три тяжёлые пересборки экранов разнесены по отдельным кадрам
-        (а не вызываются подряд в одном), по той же причине, что и в
-        switch_screen: массовая рекомпиляция canvas-дерева в один присест
-        — надёжный способ поймать нативный краш GPU-драйвера."""
+        Три тяжёлые пересборки экранов разнесены по отдельным кадрам:
+        массовая рекомпиляция canvas-дерева в один присест — надёжный
+        способ поймать нативный краш GPU-драйвера."""
         self.db_data = remote_data
         self._load_settings_from_db()
         self._load_today_from_db()
@@ -967,10 +995,11 @@ class HealthTrackerApp(MDApp):
         Clock.schedule_once(lambda dt: self.build_settings_screen(), 0.2)
 
     def _perform_cloud_upload(self):
-        """Вызывается из Debouncer (уже в отдельном потоке от threading.Timer),
-        поэтому не блокирует UI."""
-        if hasattr(self, 'drive_sync'):
-            self.drive_sync.upload_file(self.json_path)
+        """Вызывается из Debouncer (уже в отдельном потоке) или из on_stop.
+        Если пользователь ещё не входил в Google — ничего не делает."""
+        if not hasattr(self, "drive_sync") or not self._is_signed_in_flag():
+            return
+        self.drive_sync.upload_file(self.json_path)
 
     # --- локальное хранилище ------------------------------------------
 
@@ -981,12 +1010,7 @@ class HealthTrackerApp(MDApp):
             for name, item in self._tab_items.items():
                 item.set_selected(name == screen_name)
         # Тяжёлая пересборка виджетов экрана откладывается на СЛЕДУЮЩИЙ
-        # кадр через Clock.schedule_once, а не вызывается синхронно прямо
-        # внутри обработчика on_release кнопки навигации. Синхронный вызов
-        # clear_widgets() + массовое добавление новых виджетов в том же
-        # кадре, где ещё может идти обработка графики текущего touch-события,
-        # приводил к детерминированному нативному крашу GPU-драйвера
-        # (SIGSEGV в libGLESv2_adreno.so через recompile canvas-дерева).
+        # кадр, а не вызывается синхронно внутри обработчика on_release.
         Clock.schedule_once(lambda dt: self._build_screen_content(screen_name), 0)
 
     def _build_screen_content(self, screen_name):
@@ -1017,10 +1041,10 @@ class HealthTrackerApp(MDApp):
 
     def _load_settings_from_db(self):
         """Восстанавливает ВСЕ настройки, включая app_palette/app_theme_style/
-        water_icon_name (раньше они сохранялись, но не читались обратно).
-        Безопасные дефолты для отсутствующих ключей — обратная совместимость
-        со старыми JSON."""
-        settings = merge_settings_with_defaults(self.db_data.get("settings", {}))
+        water_icon_name. Безопасные дефолты для отсутствующих ключей —
+        обратная совместимость со старыми JSON."""
+        raw_settings = self.db_data.get("settings", {})
+        settings = merge_settings_with_defaults(raw_settings)
 
         self.glass_volume = settings["glass_volume"]
         self.visible_rows_count = settings["visible_rows_count"]
@@ -1028,6 +1052,7 @@ class HealthTrackerApp(MDApp):
         self.app_palette = settings["app_palette"]
         self.app_theme_style = settings["app_theme_style"]
         self.water_icon_name = settings["water_icon_name"]
+        self.db_updated_at = db_updated_at(self.db_data)
 
         for key, val in settings["vitamin_names"].items():
             self.vitamin_names[key] = val
@@ -1055,6 +1080,8 @@ class HealthTrackerApp(MDApp):
             k = f"vit{i}"
             self.db_data[today_key][k] = self.vitamin_counts.get(k, 0)
 
+        self.db_updated_at = time.time()
+
         self.db_data["settings"] = {
             "glass_volume": self.glass_volume,
             "visible_rows_count": self.visible_rows_count,
@@ -1063,11 +1090,10 @@ class HealthTrackerApp(MDApp):
             "app_theme_style": self.app_theme_style,
             "water_icon_name": self.water_icon_name,
             "vitamin_names": dict(self.vitamin_names),
-            # Фиксированный акцент по палитре (см. _theme_accent) как
-            # "#RRGGBB". Виджет читает именно это значение, а не
-            # пересчитывает цвет по имени палитры сам — так оттенок
-            # гарантированно совпадает с тем, что видно в приложении.
+            # Фиксированный акцент по палитре как "#RRGGBB" — для виджета.
             "widget_accent_hex": self._accent_hex_for_widget(),
+            # Метка времени для разрешения конфликтов при синхронизации.
+            "updated_at": self.db_updated_at,
         }
 
         if not atomic_write_json(self.json_path, dict(self.db_data)):
@@ -1155,11 +1181,8 @@ class HealthTrackerApp(MDApp):
         )
 
         btn_m50 = LightButton(text="-50ml", filled=False, on_release=lambda x: self.change_glass_volume(-50))
-
         btn_p50 = LightButton(text="+50ml", filled=False, on_release=lambda x: self.change_glass_volume(50))
-
         btn_mgl = LightButton(text="-1 glass", filled=False, on_release=lambda x: self.change_water_glass(-1))
-
         btn_pgl = LightButton(text="+1 glass", filled=False, on_release=lambda x: self.change_water_glass(1))
 
         btn_grid.add_widget(btn_m50)
@@ -1200,7 +1223,6 @@ class HealthTrackerApp(MDApp):
             )
 
             btn_sub = LightButton(text="-", filled=False, on_release=lambda x, k=key: self.change_vitamin(k, -1), size_hint_x=0.125)
-
             btn_add = LightButton(text="+", filled=False, on_release=lambda x, k=key: self.change_vitamin(k, 1), size_hint_x=0.125)
 
             row.add_widget(field)
@@ -1225,11 +1247,20 @@ class HealthTrackerApp(MDApp):
         sync_btn = LightButton(text="Sync", filled=True, color=(0.15, 0.68, 0.37, 1), on_release=lambda x: self.manual_sync())
         actions_layout.add_widget(sync_btn)
 
-        signin_btn = LightButton(text="Войти через Google", filled=False,
+        signin_text = "✓ Google" if self._is_signed_in_flag() else "Войти через Google"
+        signin_btn = LightButton(text=signin_text, filled=False,
                                   on_release=lambda x: self.sign_in_google(x))
         actions_layout.add_widget(signin_btn)
 
         layout.add_widget(actions_layout)
+
+        # Строка статуса синхронизации (обновляется через _set_sync_status).
+        self._sync_label = MDLabel(
+            text=self.sync_status,
+            halign="center",
+            adaptive_height=True
+        )
+        layout.add_widget(self._sync_label)
 
         scroll.add_widget(layout)
         container.add_widget(scroll)
@@ -1267,9 +1298,6 @@ class HealthTrackerApp(MDApp):
     # --- UI: calendar screen ---------------------------------------------
 
     def build_calendar_screen(self):
-        # ВРЕМЕННО УПРОЩЕНО ДЛЯ ДИАГНОСТИКИ КРАША. Если этот минимальный
-        # экран тоже крашится при переходе — проблема не в содержимом
-        # (гриде/кнопках), а в самом переключении MDScreenManager.
         container = self.root.ids.calendar_container
         container.clear_widgets()
 
@@ -1313,9 +1341,8 @@ class HealthTrackerApp(MDApp):
 
         month_calendar = calendar.monthcalendar(year, month)
 
-        # Строки добавляются с небольшой задержкой между собой (Clock.schedule_once),
-        # а не все 6 строк x 7 ячеек одновременно за один кадр — это и было
-        # причиной нативного краша GPU-драйвера (см. DayCell выше).
+        # Строки добавляются с небольшой задержкой между собой, а не все
+        # 6 строк x 7 ячеек одновременно за один кадр.
         def add_week(week_index):
             if week_index >= len(month_calendar):
                 return
@@ -1342,10 +1369,8 @@ class HealthTrackerApp(MDApp):
         container.add_widget(scroll)
 
     def evaluate_day_status(self, date_str, day_num):
-        # ПРИМЕЧАНИЕ (follow-up, не в рамках этого патча): статус
-        # исторических дней сейчас считается относительно ТЕКУЩЕГО
-        # water_target_val/настроек, а не тех, что были актуальны в тот
-        # день. Это отдельная задача, зафиксирована как известный риск.
+        # ПРИМЕЧАНИЕ: статус исторических дней считается относительно
+        # ТЕКУЩИХ настроек, а не тех, что были актуальны в тот день.
         day_data = self.db_data.get(date_str)
 
         if not day_data:
@@ -1371,8 +1396,6 @@ class HealthTrackerApp(MDApp):
     # --- UI: settings screen ---------------------------------------------
 
     def build_settings_screen(self):
-        # ВРЕМЕННО УПРОЩЕНО ДЛЯ ДИАГНОСТИКИ КРАША — см. комментарий
-        # в build_calendar_screen выше.
         container = self.root.ids.settings_container
         container.clear_widgets()
 
@@ -1392,11 +1415,8 @@ class HealthTrackerApp(MDApp):
             (0.12, 0.12, 0.12, 1)
         )
 
-        # Секции добавляются по одной с небольшой задержкой между собой
-        # (Clock.schedule_once), а не все сразу за один кадр. Это снижает
-        # число одновременно создаваемых MDButton/графических инструкций
-        # за кадр — та же причина краха GPU-драйвера, что и на экране
-        # календаря (см. DayCell и build_calendar_screen).
+        # Секции добавляются по одной с небольшой задержкой между собой,
+        # а не все сразу за один кадр (та же причина, что и в календаре).
 
         def add_palette_section(_dt=None):
             palette_box = MDBoxLayout(
@@ -1418,7 +1438,6 @@ class HealthTrackerApp(MDApp):
                 ("orange", "Orange"), ("purple", "Purple"), ("red", "Red"),
             ]
             for pal_key, pal_label in palettes:
-                btn_style = "filled" if self.app_palette == pal_key else "outlined"
                 btn = LightButton(text=pal_label, filled=(self.app_palette == pal_key), on_release=lambda x, pal=pal_key: self.set_app_palette(pal))
                 palette_grid.add_widget(btn)
 
@@ -1442,7 +1461,6 @@ class HealthTrackerApp(MDApp):
 
             theme_grid = MDGridLayout(cols=3, spacing="8dp", adaptive_height=True)
             for t_mode in ["Dark", "Light", "AMOLED"]:
-                t_style = "filled" if self.app_theme_style == t_mode else "outlined"
                 b = LightButton(text=t_mode, filled=(self.app_theme_style == t_mode), on_release=lambda x, m=t_mode: self.set_theme_style(m))
                 theme_grid.add_widget(b)
 
@@ -1466,9 +1484,8 @@ class HealthTrackerApp(MDApp):
                 ("water", "Drop"), ("glass-mug-variant", "Mug"), ("cup-water", "Cup"),
             ]
             for ic_name, ic_label in icons:
-                ic_style = "tonal" if self.water_icon_name == ic_name else "standard"
                 ic_btn = LightIconButton(
-                    icon=ic_name, tonal=(ic_style == "tonal"),
+                    icon=ic_name, tonal=(self.water_icon_name == ic_name),
                     on_release=lambda x, ic=ic_name: self.set_water_icon(ic)
                 )
                 icon_grid.add_widget(ic_btn)
@@ -1493,7 +1510,6 @@ class HealthTrackerApp(MDApp):
 
             btn_row_layout = MDGridLayout(cols=2, spacing="16dp", adaptive_height=True)
             btn_minus_row = LightButton(text="- Row", filled=False, on_release=lambda x: self.change_visible_rows(-1))
-
             btn_plus_row = LightButton(text="+ Row", filled=True, on_release=lambda x: self.change_visible_rows(1))
 
             btn_row_layout.add_widget(btn_minus_row)
@@ -1543,8 +1559,7 @@ class HealthTrackerApp(MDApp):
         Clock.schedule_once(lambda dt: self._refresh_nav_bar_colors(), 0.2)
 
     def _refresh_nav_bar_colors(self):
-        """Пересчитывает подсветку вкладок под новый акцент/тему без
-        полной пересборки MDNavigationBar-замены (LightTabItem)."""
+        """Пересчитывает подсветку вкладок под новый акцент/тему."""
         if hasattr(self, "_tab_items"):
             for item in self._tab_items.values():
                 item._apply_selected()
@@ -1570,8 +1585,7 @@ class HealthTrackerApp(MDApp):
             val = int(value)
             if val > 0:
                 self.water_target_val = val
-                # Печать в текстовое поле — тоже debounce внутри save_database,
-                # чтобы не улетать в облако на каждую введённую цифру.
+                # Печать в текстовое поле — тоже debounce внутри save_database.
                 self.save_database()
                 self.build_tracker_screen()
 
