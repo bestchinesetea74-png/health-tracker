@@ -1,115 +1,171 @@
 name: Build APK
 
 on:
-  workflow_dispatch:      # запуск вручную кнопкой "Run workflow" на GitHub
-  push:
-    branches: [ main ]    # + при каждом пуше в main; уберите, если не нужно
+workflow_dispatch:
+push:
+branches: [ main ]
 
 jobs:
-  build:
-    # Пин конкретной LTS-версии Ubuntu, а не "latest" — чтобы сборка не
-    # ломалась каждый раз, когда GitHub тихо переключает runner на более
-    # новый (и ещё не всеми поддерживаемый) релиз Ubuntu.
-    runs-on: ubuntu-22.04
+build:
+runs-on: ubuntu-22.04
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+```
+steps:
+  - name: Checkout repo
+    uses: actions/checkout@v4
 
-      # Стабильный debug-keystore для входа через Google (Play Services
-      # Authorization API сверяет вход по паре "имя пакета + SHA-1"). Если
-      # не подложить сюда свой файл, Android-инструменты на каждом чистом
-      # раннере генерируют СЛУЧАЙНЫЙ debug.keystore — SHA-1 будет меняться
-      # от сборки к сборке, и вход через Google будет работать через раз.
-      - name: Use stable debug keystore
-        run: |
-          mkdir -p ~/.android
-          cp ci/debug.keystore ~/.android/debug.keystore
+  - name: Use stable debug keystore
+    run: |
+      mkdir -p ~/.android
+      cp ci/debug.keystore ~/.android/debug.keystore
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
 
-      # Обход известного бага некоторых раннеров GitHub Actions: DNS
-      # отдаёт IPv6-адрес (AAAA) для сервера, с которого python-for-android
-      # качает исходники какой-то recipe, а исходящий IPv6 на раннере не
-      # работает — urlretrieve падает с "Network is unreachable" / "Cannot
-      # assign requested address" после 4 попыток. Отключение IPv6 через
-      # sysctl оказалось недостаточным (даёт другую, но ту же по сути
-      # ошибку) — вместо этого патчим socket.getaddrinfo через
-      # sitecustomize.py, чтобы Python (включая дочерний процесс
-      # pythonforandroid.toolchain, запускаемый этим же интерпретатором)
-      # вообще не пытался резолвить домены в IPv6.
-      - name: Force IPv4-only DNS resolution for Python
-        run: |
-          SITE_DIR=$(python3 -c "import site; print(site.getsitepackages()[0])")
-          cat > "$SITE_DIR/sitecustomize.py" <<'PY'
-          import socket
-          _orig_getaddrinfo = socket.getaddrinfo
-          def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-              return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-          socket.getaddrinfo = _ipv4_only_getaddrinfo
-          PY
-          echo "sitecustomize.py written to $SITE_DIR"
+  - name: Force IPv4-only DNS resolution for Python
+    run: |
+      SITE_DIR=$(python3 -c "import site; print(site.getsitepackages()[0])")
+      cat > "$SITE_DIR/sitecustomize.py" <<'PY'
+      import socket
 
-      # У раннера JAVA_HOME по умолчанию = Temurin 11, а Gradle/Android
-      # Gradle Plugin в свежих python-for-android требуют Java 17 —
-      # на 11 падает шаг "Package the application".
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+      _orig_getaddrinfo = socket.getaddrinfo
 
-      # openjdk-17-jdk ставим прямо из официальных репозиториев Ubuntu 22.04
-      # (он там есть "из коробки"), БЕЗ стороннего PPA ppa:openjdk-r/ppa —
-      # именно этот PPA сейчас не отдаёт Release-файл для свежих релизов
-      # Ubuntu и валил сборку через buildozer-action.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git zip unzip openjdk-17-jdk python3-pip \
-            autoconf libtool pkg-config zlib1g-dev \
-            libncurses5-dev libncursesw5-dev cmake \
-            libffi-dev libssl-dev automake build-essential
+      def _ipv4_only_getaddrinfo(
+          host, port, family=0, type=0, proto=0, flags=0
+      ):
+          return _orig_getaddrinfo(
+              host,
+              port,
+              socket.AF_INET,
+              type,
+              proto,
+              flags
+          )
 
-      - name: Install Buildozer
-        run: pip install --upgrade buildozer cython
+      socket.getaddrinfo = _ipv4_only_getaddrinfo
+      PY
 
-      # Подробный режим (-v) нужен, чтобы настоящая ошибка Gradle попала
-      # в лог. Весь вывод пишем в build.log, в интерфейсе показываем хвост.
-      - name: Build with Buildozer
-        run: |
-          set -o pipefail
-          buildozer -v android debug 2>&1 | tee build.log
+      echo "sitecustomize.py written to $SITE_DIR"
 
-      # Если сборка упала — показываем хвост лога прямо в интерфейсе.
-      - name: Show last lines of build log
-        if: failure()
-        run: tail -n 1500 build.log | grep -v '^#     ' | tail -n 200
+  - name: Set up Java 17
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
 
-      # Отдельно: при сетевых сбоях строка "Downloading ... from <URL>"
-      # обычно успевает "уехать" выше среза из предыдущего шага (её
-      # отделяют десятки строк повторов + Python-трейсбек + дамп
-      # переменных окружения). Ищем её явно по всему логу, чтобы сразу
-      # было видно, какой именно recipe и с какого URL не скачался.
-      - name: Show download attempts (on failure)
-        if: failure()
-        run: |
-          echo "--- Все строки 'Downloading' из полного лога ---"
-          grep -n -i "Downloading\|Download failed" build.log || echo "(ничего не найдено)"
+  - name: Install system dependencies
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y \
+        git zip unzip openjdk-17-jdk python3-pip \
+        autoconf libtool pkg-config zlib1g-dev \
+        libncurses5-dev libncursesw5-dev cmake \
+        libffi-dev libssl-dev automake build-essential
 
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
+  - name: Install Buildozer
+    run: |
+      pip install --upgrade buildozer cython
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: healthtracker-apk
-          path: bin/*.apk
+  - name: Build with Buildozer
+    run: |
+      set -o pipefail
+      buildozer -v android debug 2>&1 | tee build.log
+
+  # Показываем последние строки полного лога.
+  - name: Show last lines of build log
+    if: failure()
+    run: |
+      echo "=============================================="
+      echo "LAST 500 LINES OF BUILD LOG"
+      echo "=============================================="
+      tail -n 500 build.log
+
+  # Ищем настоящую причину падения Gradle.
+  - name: Extract Gradle error
+    if: failure()
+    run: |
+      echo ""
+      echo "=============================================="
+      echo "GRADLE ERROR SUMMARY"
+      echo "=============================================="
+
+      grep -n -E \
+        "FAILURE:|What went wrong:|Execution failed|Caused by:|Could not resolve|Could not find|Duplicate class|Manifest merger failed|AAPT|Exception|error:" \
+        build.log \
+        | tail -n 200 \
+        || true
+
+      echo ""
+      echo "=============================================="
+      echo "GRADLE FAILURE CONTEXT"
+      echo "=============================================="
+
+      FAILURE_LINE=$(grep -n "FAILURE: Build failed with an exception" build.log | tail -n 1 | cut -d: -f1)
+
+      if [ -n "$FAILURE_LINE" ]; then
+        START=$((FAILURE_LINE - 30))
+        if [ "$START" -lt 1 ]; then
+          START=1
+        fi
+
+        END=$((FAILURE_LINE + 180))
+
+        echo "Showing build.log lines $START-$END"
+        sed -n "${START},${END}p" build.log
+      else
+        echo "Gradle FAILURE marker not found."
+      fi
+
+  # Отдельно показываем проблемы скачивания зависимостей.
+  - name: Show download attempts
+    if: failure()
+    run: |
+      echo "=============================================="
+      echo "DOWNLOAD ATTEMPTS"
+      echo "=============================================="
+
+      grep -n -i \
+        "Downloading\|Download failed\|Network is unreachable\|Cannot assign requested address" \
+        build.log \
+        || echo "(download errors not found)"
+
+  # Показываем информацию о Java/Gradle окружении.
+  - name: Show Java and Gradle versions
+    if: failure()
+    run: |
+      echo "=============================================="
+      echo "JAVA"
+      echo "=============================================="
+      java -version
+
+      echo ""
+      echo "=============================================="
+      echo "JAVA HOME"
+      echo "=============================================="
+      echo "$JAVA_HOME"
+
+      echo ""
+      echo "=============================================="
+      echo "ANDROID ENVIRONMENT"
+      echo "=============================================="
+      echo "ANDROIDAPI=$ANDROIDAPI"
+      echo "ANDROIDMINAPI=$ANDROIDMINAPI"
+      echo "ANDROID_NDK=$ANDROID_NDK"
+      echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+
+  - name: Upload build log
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: build-log
+      path: build.log
+
+  - name: Upload APK artifact
+    if: success()
+    uses: actions/upload-artifact@v4
+    with:
+      name: healthtracker-apk
+      path: bin/*.apk
+```
