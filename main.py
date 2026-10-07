@@ -259,6 +259,27 @@ class PlayServicesDriveAuth:
             print(f"[DriveSync] silent authorize failed: {e}")
             return None
 
+    def preload(self):
+        """Загружает Java-классы Play Services в ОСНОВНОМ потоке.
+
+        pyjnius в фоновых потоках использует системный загрузчик классов
+        и не находит классы приложения (ClassNotFoundException). Классы,
+        однажды загруженные в основном потоке, кэшируются pyjnius и потом
+        доступны из любых потоков. Вызывать из on_start()."""
+        try:
+            from jnius import autoclass
+            self._classes()
+            for name in ("com.google.android.gms.tasks.Tasks",
+                         "java.util.concurrent.TimeUnit",
+                         "java.util.ArrayList"):
+                autoclass(name)
+            print("[DriveSync] Play Services classes preloaded OK")
+            return True
+        except Exception as e:
+            self._last_error = f"preload: {e}"
+            print(f"[DriveSync] preload failed: {e}")
+            return False
+
     def needs_consent(self):
         return self._last_error == "needs_consent"
 
@@ -801,7 +822,7 @@ class HealthTrackerApp(MDApp):
             print(f"[Storage] flag write failed: {e}")
 
     def _auto_prompt_path(self):
-        return os.path.join(os.path.dirname(self.json_path), "drive_prompted.flag")
+        return os.path.join(os.path.dirname(self.json_path), "drive_prompted_v2.flag")
 
     def _auto_prompt_done(self):
         return os.path.exists(self._auto_prompt_path())
@@ -850,6 +871,15 @@ class HealthTrackerApp(MDApp):
             nav.add_widget(item)
 
     def on_start(self):
+        # Java-классы Play Services нужно загрузить в основном потоке,
+        # до того как их начнут использовать фоновые потоки (см. preload).
+        try:
+            from kivy.utils import platform as _platform
+            if _platform == "android":
+                self.drive_sync.auth.preload()
+        except Exception as e:
+            print(f"[DriveSync] preload skipped: {e}")
+
         Clock.schedule_once(lambda dt: self.build_tracker_screen(), 0.1)
         Clock.schedule_once(lambda dt: self.build_calendar_screen(), 0.2)
         Clock.schedule_once(lambda dt: self.build_settings_screen(), 0.3)
