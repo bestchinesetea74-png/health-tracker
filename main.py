@@ -944,6 +944,7 @@ class HealthTrackerApp(MDApp):
         if AUTO_SYNC_ON_START:
             if self._is_signed_in_flag():
                 # Уже входили раньше: токен берётся тихо, без каких-либо окон.
+                self._last_sync_ts = time.time()
                 threading.Thread(target=self._sync_now, daemon=True).start()
             elif not self._auto_prompt_done():
                 # Первый запуск: один раз сами показываем системное окно
@@ -958,7 +959,7 @@ class HealthTrackerApp(MDApp):
         except OSError:
             return 0
 
-    def on_resume(self):
+    def _pull_widget_changes(self):
         """Если файл изменил виджет (пока приложение было свёрнуто),
         подхватываем изменения и отправляем их в облако."""
         if self._file_mtime() == getattr(self, "_json_mtime", 0):
@@ -974,6 +975,27 @@ class HealthTrackerApp(MDApp):
         self._apply_remote_data(data)
         # Перезаписываем файл со свежей меткой времени и ставим аплоад.
         self.save_database()
+
+    # Минимальный интервал между автосинхронизациями при возврате в
+    # приложение (секунды), чтобы не дёргать сеть при каждом разворачивании.
+    SYNC_MIN_INTERVAL = 60
+
+    def _maybe_sync_on_resume(self):
+        """Синхронизация при возврате в приложение: только если пользователь
+        уже вошёл в Google и с прошлой синхронизации прошло достаточно времени."""
+        if not (AUTO_SYNC_ON_START and self._is_signed_in_flag()):
+            return
+        now = time.time()
+        if now - getattr(self, "_last_sync_ts", 0) < self.SYNC_MIN_INTERVAL:
+            return
+        self._last_sync_ts = now
+        threading.Thread(target=self._sync_now, daemon=True).start()
+
+    def on_resume(self):
+        # Сначала подхватываем правки виджета (они обновят updated_at),
+        # затем сверяемся с Google Drive.
+        self._pull_widget_changes()
+        self._maybe_sync_on_resume()
 
     def _notify_widget(self):
         """Просит виджет на рабочем столе перерисоваться (только Android)."""
@@ -1032,7 +1054,9 @@ class HealthTrackerApp(MDApp):
                 if ok:
                     print("[Android] Google sign-in OK, syncing...")
                     self._set_signed_in_flag(True)
+                    self._last_sync_ts = time.time()
                     self.manual_sync()
+                    Clock.schedule_once(lambda dt: self.build_tracker_screen(), 0.1)
                 else:
                     err = str(self.drive_sync.auth._last_error or "unknown")
                     print(f"[Android] Google sign-in failed or cancelled: {err}")
@@ -1056,8 +1080,10 @@ class HealthTrackerApp(MDApp):
         status, remote = self.drive_sync.download_file_safe()
 
         if status == "no_auth":
+            # Доступ отозван или истёк: возвращаем кнопку входа на экран.
             self._set_signed_in_flag(False)
             self._set_sync_status("Нажмите «Войти через Google»")
+            Clock.schedule_once(lambda dt: self.build_tracker_screen(), 0)
             return
         if status == "error":
             self._set_sync_status("Ошибка синхронизации (см. лог)")
@@ -1354,13 +1380,13 @@ class HealthTrackerApp(MDApp):
         reset_btn = LightButton(text="Reset Today", filled=False, on_release=lambda x: self.reset_today())
         actions_layout.add_widget(reset_btn)
 
-        sync_btn = LightButton(text="Sync", filled=True, color=(0.15, 0.68, 0.37, 1), on_release=lambda x: self.manual_sync())
-        actions_layout.add_widget(sync_btn)
-
-        signin_text = "Google: OK" if self._is_signed_in_flag() else "Войти через Google"
-        signin_btn = LightButton(text=signin_text, filled=False,
-                                  on_release=lambda x: self.sign_in_google(x))
-        actions_layout.add_widget(signin_btn)
+        # Кнопки Sync больше нет: данные синхронизируются сами (при запуске,
+        # при возврате в приложение и через секунду после любого изменения).
+        # Кнопка входа нужна только пока пользователь ещё не вошёл в Google.
+        if not self._is_signed_in_flag():
+            signin_btn = LightButton(text="Войти через Google", filled=True,
+                                      on_release=lambda x: self.sign_in_google(x))
+            actions_layout.add_widget(signin_btn)
 
         layout.add_widget(actions_layout)
 
