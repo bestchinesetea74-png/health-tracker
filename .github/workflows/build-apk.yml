@@ -74,32 +74,65 @@ jobs:
           buildozer -v android debug 2>&1 | tee build.log
 
       # ----------------------------------------------------------------
-      # Диагностика входа через Google: показывает SHA-1 ключа из
-      # репозитория и SHA-1 реально собранного APK. Именно это значение
-      # должно быть вписано в Google Cloud Console (Clients -> Android).
-      # Результат — на странице запуска, в блоке Summary.
+      # Переподпись APK постоянным ключом ci/debug.keystore.
+      #
+      # Buildozer/p4a подписывает debug-APK своим ключом, а не тем, что
+      # лежит в ~/.android/debug.keystore (SHA-1 в логе не совпал). Вход
+      # через Google проверяет пару "пакет + SHA-1", поэтому подпись
+      # должна быть ВСЕГДА одной и той же — SHA-1 этого ключа внесён в
+      # Google Cloud Console (Clients -> Android).
+      #
+      # Порядок: снять старую подпись -> zipalign -> apksigner sign.
       # ----------------------------------------------------------------
-      - name: Print signing SHA-1 (keystore and built APK)
-        if: success()
+      - name: Re-sign APK with stable keystore
         run: |
-          APK=$(ls bin/*.apk | head -1)
+          set -e
+          BT=$(ls -d ~/.buildozer/android/platform/android-sdk/build-tools/*/ 2>/dev/null | sort -V | tail -1)
+          if [ -z "$BT" ]; then
+            echo "Android build-tools not found under ~/.buildozer"
+            exit 1
+          fi
+          echo "Using build-tools: $BT"
 
+          SRC=$(ls bin/*.apk | head -1)
+          echo "Source APK: $SRC"
+
+          mkdir -p signed
+          cp "$SRC" signed/unsigned.apk
+
+          # Убираем прежние файлы подписи (zip возвращает код 12, если
+          # удалять нечего — это не ошибка).
+          zip -q -d signed/unsigned.apk \
+            'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' 'META-INF/MANIFEST.MF' \
+            || true
+
+          "${BT}zipalign" -f -p 4 signed/unsigned.apk signed/aligned.apk
+
+          "${BT}apksigner" sign \
+            --ks ci/debug.keystore \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --out signed/healthtracker-signed.apk \
+            signed/aligned.apk
+
+          "${BT}apksigner" verify --print-certs signed/healthtracker-signed.apk
+
+          echo "BT=$BT" >> "$GITHUB_ENV"
+
+      # Диагностика: SHA-1 ключа и итогового APK должны совпасть, а также
+      # совпасть со значением в Google Cloud Console.
+      - name: Print signing SHA-1 (keystore and signed APK)
+        run: |
           KS_SHA1=$(keytool -list -v -keystore ci/debug.keystore \
             -alias androiddebugkey -storepass android 2>&1 | grep "SHA1" || echo "SHA1: (не удалось прочитать)")
-
-          APK_SHA1=$(keytool -printcert -jarfile "$APK" 2>&1 | grep "SHA1" || true)
-          if [ -z "$APK_SHA1" ]; then
-            APKSIGNER=$(find ~/.buildozer -path "*build-tools*" -name apksigner 2>/dev/null | head -1)
-            if [ -n "$APKSIGNER" ]; then
-              APK_SHA1=$("$APKSIGNER" verify --print-certs "$APK" 2>&1 | grep -i "SHA-1" || true)
-            fi
-          fi
-          [ -z "$APK_SHA1" ] && APK_SHA1="(не удалось прочитать подпись APK)"
+          APK_SHA1=$("${BT}apksigner" verify --print-certs signed/healthtracker-signed.apk 2>&1 \
+            | grep -i "SHA-1" || echo "(не удалось прочитать подпись APK)")
 
           {
             echo "## Подпись сборки (для Google Cloud Console)"
             echo ""
-            echo "APK: \`$APK\`"
+            echo "APK: \`signed/healthtracker-signed.apk\`"
             echo ""
             echo "**Ключ ci/debug.keystore:**"
             echo ""
@@ -107,7 +140,7 @@ jobs:
             echo "$KS_SHA1"
             echo "\`\`\`"
             echo ""
-            echo "**Собранный APK:**"
+            echo "**Подписанный APK:**"
             echo ""
             echo "\`\`\`"
             echo "$APK_SHA1"
@@ -115,7 +148,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "ci/debug.keystore -> $KS_SHA1"
-          echo "built APK        -> $APK_SHA1"
+          echo "signed APK        -> $APK_SHA1"
 
       - name: Show last lines of build log
         if: failure()
@@ -201,9 +234,10 @@ jobs:
           name: build-log
           path: build.log
 
+      # Загружаем ПЕРЕПОДПИСАННЫЙ APK (с ключом ci/debug.keystore).
       - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: healthtracker-apk
-          path: bin/*.apk
+          path: signed/healthtracker-signed.apk
