@@ -321,45 +321,66 @@ class PlayServicesDriveAuth:
                     on_done(True)
                     return
 
-                from jnius import autoclass
-                from android import activity as android_activity
-                from android.runnable import run_on_ui_thread
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                activity = PythonActivity.mActivity
-
                 done_event = threading.Event()
                 outcome = {"ok": False}
 
-                def _on_activity_result(requestCode, resultCode, data):
-                    if requestCode != self.REQUEST_CODE_AUTHORIZE:
-                        return
-                    android_activity.unbind(on_activity_result=_on_activity_result)
-                    try:
-                        client.getAuthorizationResultFromIntent(data)
-                        outcome["ok"] = True
-                    except Exception as e:
-                        print(f"[DriveSync] getAuthorizationResultFromIntent failed: {e}")
-                        outcome["ok"] = False
-                        outcome["err"] = f"consent: {e}"
-                    done_event.set()
+                def _bind_and_launch(_dt):
+                    """Выполняется в ОСНОВНОМ потоке Kivy (через Clock).
 
-                android_activity.bind(on_activity_result=_on_activity_result)
-
-                @run_on_ui_thread
-                def _launch():
+                    Подписка на результат активности создаёт Java-прокси
+                    PythonActivity$ActivityResultListener. Из фонового потока
+                    pyjnius не находит этот класс (ClassNotFoundException),
+                    поэтому и bind(), и запуск системного окна делаем здесь,
+                    а фоновый поток только ждёт done_event."""
                     try:
-                        pending_intent = result.getPendingIntent()
-                        sender = pending_intent.getIntentSender()
-                        activity.startIntentSenderForResult(
-                            sender, self.REQUEST_CODE_AUTHORIZE, None, 0, 0, 0, None
-                        )
+                        from jnius import autoclass
+                        from android import activity as android_activity
+                        from android.runnable import run_on_ui_thread
+                        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                        activity = PythonActivity.mActivity
+
+                        def _on_activity_result(requestCode, resultCode, data):
+                            if requestCode != self.REQUEST_CODE_AUTHORIZE:
+                                return
+                            try:
+                                android_activity.unbind(on_activity_result=_on_activity_result)
+                            except Exception:
+                                pass
+                            try:
+                                client.getAuthorizationResultFromIntent(data)
+                                outcome["ok"] = True
+                            except Exception as e:
+                                print(f"[DriveSync] getAuthorizationResultFromIntent failed: {e}")
+                                outcome["ok"] = False
+                                outcome["err"] = f"consent: {e}"
+                            done_event.set()
+
+                        android_activity.bind(on_activity_result=_on_activity_result)
+
+                        @run_on_ui_thread
+                        def _launch():
+                            try:
+                                pending_intent = result.getPendingIntent()
+                                sender = pending_intent.getIntentSender()
+                                activity.startIntentSenderForResult(
+                                    sender, self.REQUEST_CODE_AUTHORIZE, None, 0, 0, 0, None
+                                )
+                            except Exception as e:
+                                print(f"[DriveSync] startIntentSenderForResult failed: {e}")
+                                outcome["err"] = f"launch: {e}"
+                                try:
+                                    android_activity.unbind(on_activity_result=_on_activity_result)
+                                except Exception:
+                                    pass
+                                done_event.set()
+
+                        _launch()
                     except Exception as e:
-                        print(f"[DriveSync] startIntentSenderForResult failed: {e}")
-                        outcome["err"] = f"launch: {e}"
-                        android_activity.unbind(on_activity_result=_on_activity_result)
+                        print(f"[DriveSync] bind/launch failed: {e}")
+                        outcome["err"] = f"bind: {e}"
                         done_event.set()
 
-                _launch()
+                Clock.schedule_once(_bind_and_launch, 0)
                 # Пользователь может долго выбирать аккаунт — ждём до 3 минут.
                 if not done_event.wait(180):
                     print("[DriveSync] sign-in timed out waiting for activity result")
