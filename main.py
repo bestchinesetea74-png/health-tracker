@@ -453,6 +453,7 @@ class GoogleDriveSync:
         """Синхронная выгрузка. Вызывающая сторона отвечает за то, чтобы
         это не выполнялось в основном UI-потоке. Возвращает True/False."""
         if not os.path.exists(local_filepath):
+            print(f"[DriveSync] Upload skipped: local file not found: {local_filepath}")
             return False
         try:
             if not self.file_id:
@@ -917,6 +918,14 @@ class HealthTrackerApp(MDApp):
             nav.add_widget(item)
 
     def on_start(self):
+        # Первый запуск: файла базы ещё нет (он создаётся только при первом
+        # изменении данных). Создаём его сразу, чтобы было что синхронизировать.
+        if not os.path.exists(self.json_path):
+            try:
+                self.save_database(upload=False)
+            except Exception as e:
+                print(f"[Storage] initial save failed: {e}")
+
         # Java-классы Play Services нужно загрузить в основном потоке,
         # до того как их начнут использовать фоновые потоки (см. preload).
         try:
@@ -1019,7 +1028,7 @@ class HealthTrackerApp(MDApp):
         def _on_done(ok):
             def _update(_dt):
                 if label:
-                    label.text = "✓ Google" if ok else "Повторить"
+                    label.text = "Google: OK" if ok else "Повторить"
                 if ok:
                     print("[Android] Google sign-in OK, syncing...")
                     self._set_signed_in_flag(True)
@@ -1348,7 +1357,7 @@ class HealthTrackerApp(MDApp):
         sync_btn = LightButton(text="Sync", filled=True, color=(0.15, 0.68, 0.37, 1), on_release=lambda x: self.manual_sync())
         actions_layout.add_widget(sync_btn)
 
-        signin_text = "✓ Google" if self._is_signed_in_flag() else "Войти через Google"
+        signin_text = "Google: OK" if self._is_signed_in_flag() else "Войти через Google"
         signin_btn = LightButton(text=signin_text, filled=False,
                                   on_release=lambda x: self.sign_in_google(x))
         actions_layout.add_widget(signin_btn)
